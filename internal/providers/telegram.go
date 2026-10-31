@@ -69,6 +69,35 @@ func (u *TelegramUploader) Upload(ctx context.Context, t *task.Task, filePath st
 		equalSplits = true
 	}
 
+	// 1. Apply Prefix and Suffix to file before splitting/uploading
+	prefix := ""
+	suffix := ""
+	if uSettings != nil {
+		prefix = uSettings.Prefix
+		suffix = uSettings.Suffix
+	}
+	if prefix == "" && cfg != nil {
+		prefix = cfg.LeechPrefix
+	}
+	if suffix == "" && cfg != nil {
+		suffix = cfg.LeechSuffix
+	}
+
+	if prefix != "" || suffix != "" {
+		if fi, err := os.Stat(filePath); err == nil && !fi.IsDir() {
+			dir := filepath.Dir(filePath)
+			origName := filepath.Base(filePath)
+			newName := utils.ApplyPrefixSuffix(origName, prefix, suffix)
+			if newName != origName {
+				newPath := filepath.Join(dir, newName)
+				if err := os.Rename(filePath, newPath); err == nil {
+					filePath = newPath
+					t.SetName(newName)
+				}
+			}
+		}
+	}
+
 	parts, err := media.SplitFileCustom(filePath, splitLimit, equalSplits)
 	if err != nil {
 		return nil, fmt.Errorf("splitting file failed: %w", err)
@@ -97,7 +126,16 @@ func (u *TelegramUploader) Upload(ctx context.Context, t *task.Task, filePath st
 		}
 
 		partName := filepath.Base(partPath)
-		caption := buildCaption(partName, info.Size(), idx+1, len(parts), t, uSettings, cfg)
+
+		// Probe video metadata if file is a video container (for attributes and dynamic caption variables)
+		ext := strings.ToLower(filepath.Ext(partPath))
+		isVideoExt := (ext == ".mp4" || ext == ".mkv" || ext == ".avi" || ext == ".mov" || ext == ".webm" || ext == ".flv" || ext == ".wmv")
+		var meta *media.VideoMetadata
+		if isVideoExt {
+			meta, _ = media.GetVideoMetadata(ctx, partPath)
+		}
+
+		caption := buildCaption(partName, info.Size(), idx+1, len(parts), t, uSettings, cfg, meta)
 
 		// Upload options with progress tracking
 		upOpts := &tg.UploadOptions{
@@ -118,9 +156,7 @@ func (u *TelegramUploader) Upload(ctx context.Context, t *task.Task, filePath st
 			Upload:    upOpts,
 		}
 
-		// Handle video metadata and thumbnail if sending as video
-		ext := strings.ToLower(filepath.Ext(partPath))
-		isVideo := !isDoc && (ext == ".mp4" || ext == ".mkv" || ext == ".avi" || ext == ".mov" || ext == ".webm")
+		isVideo := !isDoc && isVideoExt
 
 		// Apply custom thumbnail if available
 		customThumb := t.Options.CustomThumb
@@ -134,7 +170,6 @@ func (u *TelegramUploader) Upload(ctx context.Context, t *task.Task, filePath st
 		}
 
 		if isVideo {
-			meta, _ := media.GetVideoMetadata(ctx, partPath)
 			if mediaOpts.Thumb == nil {
 				thumbPath, _ := media.GenerateThumbnail(ctx, partPath, filepath.Dir(partPath))
 				if thumbPath != "" {
@@ -197,43 +232,21 @@ func (u *TelegramUploader) Upload(ctx context.Context, t *task.Task, filePath st
 	}, nil
 }
 
-func buildCaption(filename string, size int64, partNum, totalParts int, t *task.Task, uSettings *db.UserSettings, cfg *config.Config) string {
-	var prefix, suffix, userCaption string
-	if uSettings != nil {
-		prefix = uSettings.Prefix
-		suffix = uSettings.Suffix
+func buildCaption(filename string, size int64, partNum, totalParts int, t *task.Task, uSettings *db.UserSettings, cfg *config.Config, meta *media.VideoMetadata) string {
+	userCaption := ""
+	if uSettings != nil && uSettings.Caption != "" {
 		userCaption = uSettings.Caption
-	}
-	if prefix == "" {
-		prefix = cfg.LeechPrefix
-	}
-	if suffix == "" {
-		suffix = cfg.LeechSuffix
-	}
-	if userCaption == "" {
+	} else if cfg != nil && cfg.LeechCaption != "" {
 		userCaption = cfg.LeechCaption
 	}
 
-	var sb strings.Builder
-	if prefix != "" {
-		sb.WriteString("<b>" + prefix + "</b> ")
-	}
-	sb.WriteString("<code>" + filename + "</code>")
-	if suffix != "" {
-		sb.WriteString(" <b>" + suffix + "</b>")
-	}
-
-	sb.WriteString("\n\n┠ <b>ꜱɪᴢᴇ:</b> " + utils.FormatBytes(size))
-	if totalParts > 1 {
-		sb.WriteString(fmt.Sprintf("\n┠ <b>ᴘᴀʀᴛ:</b> %d / %d", partNum, totalParts))
-	}
-	if t.UserName != "" {
-		sb.WriteString("\n┠ <b>ʙʏ:</b> @" + t.UserName)
+	var width, height int
+	var durationSec int64
+	if meta != nil {
+		width = meta.Width
+		height = meta.Height
+		durationSec = int64(meta.Duration)
 	}
 
-	if userCaption != "" {
-		sb.WriteString("\n\n" + userCaption)
-	}
-
-	return sb.String()
+	return utils.FormatCaption(userCaption, filename, size, partNum, totalParts, t.UserName, fmt.Sprintf("%d", t.UserID), width, height, durationSec)
 }

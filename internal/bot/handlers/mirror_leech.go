@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -314,6 +315,38 @@ func runTaskPipeline(t *task.Task, origMsg, notifyMsg, replyMsg *tg.NewMessage, 
 		}
 	}
 
+	// Apply Prefix & Suffix for Leech tasks
+	cfg := config.Get()
+	if t.Type == task.TypeLeech {
+		prefix := ""
+		suffix := ""
+		if uSettings != nil {
+			prefix = uSettings.Prefix
+			suffix = uSettings.Suffix
+		}
+		if prefix == "" && cfg != nil {
+			prefix = cfg.LeechPrefix
+		}
+		if suffix == "" && cfg != nil {
+			suffix = cfg.LeechSuffix
+		}
+
+		if prefix != "" || suffix != "" {
+			if fi, err := os.Stat(workPath); err == nil && !fi.IsDir() {
+				dir := filepath.Dir(workPath)
+				origName := filepath.Base(workPath)
+				newName := utils.ApplyPrefixSuffix(origName, prefix, suffix)
+				if newName != origName {
+					newPath := filepath.Join(dir, newName)
+					if err := os.Rename(workPath, newPath); err == nil {
+						workPath = newPath
+						t.SetName(newName)
+					}
+				}
+			}
+		}
+	}
+
 	// 4. Acquire Upload Slot
 	if err := task.GlobalManager.AcquireUploadSlot(t); err != nil {
 		t.SetError(err)
@@ -326,7 +359,6 @@ func runTaskPipeline(t *task.Task, origMsg, notifyMsg, replyMsg *tg.NewMessage, 
 	updateQueueCard(true)
 
 	// 5. Upload based on task type
-	cfg := config.Get()
 	var uploadRes *providers.UploadResult
 	var upErr error
 
