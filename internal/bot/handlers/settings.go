@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"html"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -117,6 +119,14 @@ func RenderUserSettings(userID int64) (string, tg.ReplyMarkup) {
 		tg.Button.Row(
 			tg.Button.Data("🖼 View Thumb", fmt.Sprintf("usetting:view_thumb:%d", userID)),
 			tg.Button.Data("🗑 Delete Thumb", fmt.Sprintf("usetting:del_thumb:%d", userID)),
+		),
+		tg.Button.Row(
+			tg.Button.Data("🏷 Set Prefix", fmt.Sprintf("usetting:info_prefix:%d", userID)),
+			tg.Button.Data("🏷 Set Suffix", fmt.Sprintf("usetting:info_suffix:%d", userID)),
+		),
+		tg.Button.Row(
+			tg.Button.Data("📝 Set Caption", fmt.Sprintf("usetting:info_caption:%d", userID)),
+			tg.Button.Data("📺 Set Dump", fmt.Sprintf("usetting:info_dump:%d", userID)),
 		),
 		tg.Button.Row(
 			tg.Button.Data("♻️ Refresh", fmt.Sprintf("usetting:refresh:%d", userID)),
@@ -389,6 +399,19 @@ func HandleCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 				_, _ = cb.Answer("No custom thumbnail found. Send a photo in private chat to set one!", &tg.CallbackOptions{Alert: true})
 				return nil
 
+			case "info_prefix":
+				_, _ = cb.Answer("To set prefix, send:\n/setprefix <text>\nTo clear: /setprefix", &tg.CallbackOptions{Alert: true})
+				return nil
+			case "info_suffix":
+				_, _ = cb.Answer("To set suffix, send:\n/setsuffix <text>\nTo clear: /setsuffix", &tg.CallbackOptions{Alert: true})
+				return nil
+			case "info_caption":
+				_, _ = cb.Answer("To set caption template, send:\n/setcaption <text>\nPlaceholders: {filename}, {size}, {duration}, {speed}\nTo clear: /setcaption", &tg.CallbackOptions{Alert: true})
+				return nil
+			case "info_dump":
+				_, _ = cb.Answer("To set dump channel, send:\n/setdump <chat_id>\nTo clear: /setdump", &tg.CallbackOptions{Alert: true})
+				return nil
+
 			case "refresh":
 				_, _ = cb.Answer("Refreshed", &tg.CallbackOptions{})
 			}
@@ -485,4 +508,184 @@ func HandleCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 
 	_, _ = cb.Answer("Action handled", &tg.CallbackOptions{})
 	return nil
+}
+
+// HandleSetThumb sets custom leech thumbnail from replied photo or document
+func HandleSetThumb(m *tg.NewMessage) error {
+	senderID := m.SenderID()
+
+	targetMsg := m
+	if m.IsReply() {
+		if r, err := m.GetReplyMessage(); err == nil && r != nil {
+			targetMsg = r
+		}
+	}
+
+	if targetMsg.Photo() == nil && !targetMsg.IsMedia() {
+		_, err := m.Reply("⚠️ <b>Please reply to a photo or image</b> with <code>/setthumb</code>, or send a photo directly in private chat.", &tg.SendOptions{ParseMode: "html"})
+		return err
+	}
+
+	thumbDir := filepath.Join("data", "thumbnails")
+	_ = os.MkdirAll(thumbDir, 0755)
+	targetFile := filepath.Join(thumbDir, fmt.Sprintf("%d.jpg", senderID))
+
+	_, err := targetMsg.Download(&tg.DownloadOptions{FileName: targetFile})
+	if err != nil {
+		_, err = m.Reply("❌ Failed to download and save thumbnail: "+err.Error(), &tg.SendOptions{})
+		return err
+	}
+
+	if db.GlobalStore != nil {
+		st, _ := db.GlobalStore.GetUserSettings(senderID)
+		if st == nil {
+			st = &db.UserSettings{UserID: senderID}
+		}
+		st.ThumbPath = targetFile
+		_ = db.GlobalStore.SaveUserSettings(st)
+	}
+
+	msg := `🖼 <b><u>Custom Leech Thumbnail Saved!</u></b>
+│
+┠ <b>File:</b> <code>Saved to persistent profile</code>
+┠ <b>Status:</b> ✅ Active
+│
+┖ <i>This thumbnail will be embedded into all your future leeched media files!</i>`
+
+	_, err = m.Reply(msg, &tg.SendOptions{
+		ParseMode: "html",
+		ReplyMarkup: tg.Button.Keyboard(
+			tg.Button.Row(
+				tg.Button.Data("⚙️ View Settings", fmt.Sprintf("usetting:refresh:%d", senderID)),
+				tg.Button.Data("🗑 Delete Thumb", fmt.Sprintf("usetting:del_thumb:%d", senderID)),
+			),
+		),
+	})
+	return err
+}
+
+// HandleDelThumb deletes the active custom leech thumbnail
+func HandleDelThumb(m *tg.NewMessage) error {
+	senderID := m.SenderID()
+	if db.GlobalStore != nil {
+		st, _ := db.GlobalStore.GetUserSettings(senderID)
+		if st != nil && st.ThumbPath != "" {
+			_ = os.Remove(st.ThumbPath)
+			st.ThumbPath = ""
+			_ = db.GlobalStore.SaveUserSettings(st)
+			_, err := m.Reply("🗑 <b>Custom thumbnail removed successfully.</b>", &tg.SendOptions{ParseMode: "html"})
+			return err
+		}
+	}
+	_, err := m.Reply("⚠️ You do not have an active custom thumbnail.", &tg.SendOptions{})
+	return err
+}
+
+// HandleSetPrefix sets or clears custom leech filename prefix
+func HandleSetPrefix(m *tg.NewMessage) error {
+	senderID := m.SenderID()
+	prefix := strings.TrimSpace(m.Args())
+
+	if db.GlobalStore != nil {
+		st, _ := db.GlobalStore.GetUserSettings(senderID)
+		if st == nil {
+			st = &db.UserSettings{UserID: senderID}
+		}
+		st.Prefix = prefix
+		_ = db.GlobalStore.SaveUserSettings(st)
+	}
+
+	if prefix == "" {
+		_, err := m.Reply("🗑 <b>Custom leech prefix cleared.</b>", &tg.SendOptions{ParseMode: "html"})
+		return err
+	}
+
+	_, err := m.Reply(fmt.Sprintf("🏷 <b>Leech Prefix updated:</b> <code>%s</code>", html.EscapeString(prefix)), &tg.SendOptions{ParseMode: "html"})
+	return err
+}
+
+// HandleSetSuffix sets or clears custom leech filename suffix
+func HandleSetSuffix(m *tg.NewMessage) error {
+	senderID := m.SenderID()
+	suffix := strings.TrimSpace(m.Args())
+
+	if db.GlobalStore != nil {
+		st, _ := db.GlobalStore.GetUserSettings(senderID)
+		if st == nil {
+			st = &db.UserSettings{UserID: senderID}
+		}
+		st.Suffix = suffix
+		_ = db.GlobalStore.SaveUserSettings(st)
+	}
+
+	if suffix == "" {
+		_, err := m.Reply("🗑 <b>Custom leech suffix cleared.</b>", &tg.SendOptions{ParseMode: "html"})
+		return err
+	}
+
+	_, err := m.Reply(fmt.Sprintf("🏷 <b>Leech Suffix updated:</b> <code>%s</code>", html.EscapeString(suffix)), &tg.SendOptions{ParseMode: "html"})
+	return err
+}
+
+// HandleSetCaption sets or clears custom leech caption template
+func HandleSetCaption(m *tg.NewMessage) error {
+	senderID := m.SenderID()
+	caption := strings.TrimSpace(m.Args())
+
+	if db.GlobalStore != nil {
+		st, _ := db.GlobalStore.GetUserSettings(senderID)
+		if st == nil {
+			st = &db.UserSettings{UserID: senderID}
+		}
+		st.Caption = caption
+		_ = db.GlobalStore.SaveUserSettings(st)
+	}
+
+	if caption == "" {
+		_, err := m.Reply("🗑 <b>Custom caption reset to default.</b>", &tg.SendOptions{ParseMode: "html"})
+		return err
+	}
+
+	msg := fmt.Sprintf(`📝 <b><u>Custom Leech Caption Saved!</u></b>
+│
+<blockquote expandable>%s</blockquote>
+│
+┖ <i>Available placeholders: {filename}, {size}, {duration}, {speed}</i>`, html.EscapeString(caption))
+
+	_, err := m.Reply(msg, &tg.SendOptions{ParseMode: "html"})
+	return err
+}
+
+// HandleSetDump sets or clears the target leech dump channel
+func HandleSetDump(m *tg.NewMessage) error {
+	senderID := m.SenderID()
+	arg := strings.TrimSpace(m.Args())
+
+	if db.GlobalStore != nil {
+		st, _ := db.GlobalStore.GetUserSettings(senderID)
+		if st == nil {
+			st = &db.UserSettings{UserID: senderID}
+		}
+
+		if arg == "" {
+			st.DumpChat = 0
+			_ = db.GlobalStore.SaveUserSettings(st)
+			_, err := m.Reply("🗑 <b>Leech dump channel cleared.</b>", &tg.SendOptions{ParseMode: "html"})
+			return err
+		}
+
+		id, err := strconv.ParseInt(arg, 10, 64)
+		if err != nil {
+			_, err = m.Reply("❌ Invalid chat ID format. Example: <code>/setdump -1001234567890</code>", &tg.SendOptions{ParseMode: "html"})
+			return err
+		}
+
+		st.DumpChat = id
+		_ = db.GlobalStore.SaveUserSettings(st)
+		_, err = m.Reply(fmt.Sprintf("📺 <b>Leech dump channel set to:</b> <code>%d</code>", id), &tg.SendOptions{ParseMode: "html"})
+		return err
+	}
+
+	_, err := m.Reply("Database unavailable.", &tg.SendOptions{})
+	return err
 }

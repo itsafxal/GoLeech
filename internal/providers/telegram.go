@@ -101,11 +101,24 @@ func (u *TelegramUploader) Upload(ctx context.Context, t *task.Task, filePath st
 		ext := strings.ToLower(filepath.Ext(partPath))
 		isVideo := !isDoc && (ext == ".mp4" || ext == ".mkv" || ext == ".avi" || ext == ".mov" || ext == ".webm")
 
+		// Apply custom thumbnail if available
+		customThumb := t.Options.CustomThumb
+		if customThumb == "" && uSettings != nil {
+			customThumb = uSettings.ThumbPath
+		}
+		if customThumb != "" {
+			if _, err := os.Stat(customThumb); err == nil {
+				mediaOpts.Thumb = customThumb
+			}
+		}
+
 		if isVideo {
 			meta, _ := media.GetVideoMetadata(ctx, partPath)
-			thumbPath, _ := media.GenerateThumbnail(ctx, partPath, filepath.Dir(partPath))
-			if thumbPath != "" {
-				mediaOpts.Thumb = thumbPath
+			if mediaOpts.Thumb == nil {
+				thumbPath, _ := media.GenerateThumbnail(ctx, partPath, filepath.Dir(partPath))
+				if thumbPath != "" {
+					mediaOpts.Thumb = thumbPath
+				}
 			}
 			if meta != nil {
 				mediaOpts.Attributes = append(mediaOpts.Attributes, &tg.DocumentAttributeVideo{

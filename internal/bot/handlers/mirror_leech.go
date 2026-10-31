@@ -8,6 +8,7 @@ import (
 
 	"github.com/GoLeech/GoLeech/internal/auth"
 	"github.com/GoLeech/GoLeech/internal/config"
+	"github.com/GoLeech/GoLeech/internal/db"
 	"github.com/GoLeech/GoLeech/internal/downloader"
 	dlHTTP "github.com/GoLeech/GoLeech/internal/downloader/http"
 	dlTG "github.com/GoLeech/GoLeech/internal/downloader/telegram"
@@ -48,6 +49,27 @@ func processTask(m *tg.NewMessage, tType task.TaskType, botClient, userClient *t
 	}
 
 	opts := utils.ParseTaskOptions(m.Args())
+
+	// Apply user personal defaults if flags not explicitly passed
+	if db.GlobalStore != nil {
+		if st, _ := db.GlobalStore.GetUserSettings(senderID); st != nil {
+			if !opts.AsDocument && !opts.AsMedia && st.AsDoc {
+				opts.AsDocument = true
+			}
+			if opts.SplitSize == 0 && st.SplitSize > 0 {
+				opts.SplitSize = st.SplitSize
+			}
+			if opts.CustomThumb == "" && st.ThumbPath != "" {
+				opts.CustomThumb = st.ThumbPath
+			}
+			if opts.DumpChat == "" && st.DumpChat != 0 {
+				opts.DumpChat = fmt.Sprintf("%d", st.DumpChat)
+			}
+			if opts.UploadDest == "" && st.UploadDest != "" {
+				opts.UploadDest = st.UploadDest
+			}
+		}
+	}
 
 	// Check if replied message contains media or links
 	replyMsg, _ := m.GetReplyMessage()

@@ -140,11 +140,19 @@ func RegisterRoutes(botClient *tg.Client) {
 	// 5. Search Engine
 	botClient.On(cmd("search"), handlers.HandleSearch)
 
-	// 6. Settings Panels
+	// 6. Settings Panels & Customization
 	botClient.On(cmd("usetting"), handlers.HandleUserSettings)
 	botClient.On(cmd("us"), handlers.HandleUserSettings)
 	botClient.On(cmd("bsetting"), handlers.HandleBotSettings)
 	botClient.On(cmd("bs"), handlers.HandleBotSettings)
+	botClient.On(cmd("setthumb"), handlers.HandleSetThumb)
+	botClient.On(cmd("thumb"), handlers.HandleSetThumb)
+	botClient.On(cmd("delthumb"), handlers.HandleDelThumb)
+	botClient.On(cmd("rmthumb"), handlers.HandleDelThumb)
+	botClient.On(cmd("setprefix"), handlers.HandleSetPrefix)
+	botClient.On(cmd("setsuffix"), handlers.HandleSetSuffix)
+	botClient.On(cmd("setcaption"), handlers.HandleSetCaption)
+	botClient.On(cmd("setdump"), handlers.HandleSetDump)
 
 	// 7. Administration, Permissions & Maintenance
 	botClient.On(cmd("ping"), handlers.HandlePing)

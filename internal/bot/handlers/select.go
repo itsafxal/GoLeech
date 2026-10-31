@@ -73,3 +73,4 @@ func HandleSelect(m *tg.NewMessage) error {
 	_, err := m.Reply(msg, &tg.SendOptions{ParseMode: "html"})
 	return err
 }
+

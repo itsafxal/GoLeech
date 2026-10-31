@@ -48,3 +48,4 @@ func TestGetStatsMessage(t *testing.T) {
 		t.Errorf("expected Gogram in stats message, got: %s", stats)
 	}
 }
+
