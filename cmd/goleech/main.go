@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -18,6 +19,49 @@ import (
 	"github.com/GoLeech/GoLeech/internal/web"
 	tg "github.com/amarnathcjd/gogram/telegram"
 )
+
+func initBotClient(cfg *config.Config) (*tg.Client, error) {
+	// Use persistent session file to avoid repeated DH handshakes and Wrong new_nonce_hash1
+	sessionDir := "data"
+	_ = os.MkdirAll(sessionDir, 0755)
+	sessionPath := filepath.Join(sessionDir, "bot.session")
+
+	client, err := tg.NewClient(tg.ClientConfig{
+		AppID:   cfg.TelegramAPI,
+		AppHash: cfg.TelegramHash,
+		Session: sessionPath,
+	})
+	if err != nil {
+		client, err = tg.NewClient(tg.ClientConfig{
+			AppID:   cfg.TelegramAPI,
+			AppHash: cfg.TelegramHash,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("creating client: %w", err)
+		}
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= 5; attempt++ {
+		if err := client.Connect(); err != nil {
+			lastErr = err
+			log.Printf("⚠️ Telegram connection attempt %d/5 failed: %v. Retrying in 2s...", attempt, err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		if err := client.LoginBot(cfg.BotToken); err != nil {
+			lastErr = err
+			log.Printf("⚠️ Telegram bot login attempt %d/5 failed: %v. Retrying in 2s...", attempt, err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		return client, nil
+	}
+
+	return nil, fmt.Errorf("failed after 5 attempts: %w", lastErr)
+}
 
 func main() {
 	fmt.Print(`
@@ -54,7 +98,7 @@ func main() {
 
 	if cfg.BotToken != "" && cfg.TelegramAPI != 0 && cfg.TelegramHash != "" {
 		var bErr error
-		botClient, bErr = tg.QuickBot(cfg.TelegramAPI, cfg.TelegramHash, cfg.BotToken)
+		botClient, bErr = initBotClient(cfg)
 		if bErr != nil {
 			log.Fatalf("❌ Failed to initialize Gogram Bot client: %v", bErr)
 		}
@@ -74,7 +118,8 @@ func main() {
 				if _, err := userClient.Conn(); err == nil {
 					log.Println("👤 Telegram 4GB Premium User Client connected")
 				} else {
-					log.Printf("⚠️ User Client connection error: %v", err)
+					log.Printf("⚠️ User Client connection error: %v (verify USER_SESSION_STRING with 'go run ./cmd/login')", err)
+					userClient = nil
 				}
 			}
 		}
@@ -102,32 +147,32 @@ func main() {
 	_ = rssMonitor
 	log.Println("📰 Background RSS Feed Monitor active")
 
-	// 9. Graceful Shutdown Signal Handling
+	log.Println("🎉 GoLeech is running and ready for transmissions!")
+
+	// 9. Process Life-Cycle & Graceful Shutdown
+	// We wait directly on OS termination signals so internal MTProto DC migrations or TCP reconnects
+	// do NOT cause the application process to prematurely exit!
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
-	go func() {
-		sig := <-sigCh
-		log.Printf("🛑 Received termination signal (%v). Initiating graceful shutdown...", sig)
+	sig := <-sigCh
+	log.Printf("🛑 Received termination signal (%v). Initiating graceful shutdown...", sig)
 
-		rootCancel()
-		if webServer != nil {
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = webServer.Shutdown(shutdownCtx)
-		}
-
-		// Cancel all remaining active tasks
-		task.GlobalManager.CancelAll("all", 0, true)
-		log.Println("✅ All active tasks stopped and resources cleared. Goodbye!")
-		os.Exit(0)
-	}()
-
-	log.Println("🎉 GoLeech is running and ready for transmissions!")
+	rootCancel()
+	if webServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = webServer.Shutdown(shutdownCtx)
+	}
 
 	if botClient != nil {
-		botClient.Idle()
-	} else {
-		select {}
+		_ = botClient.Stop()
 	}
+	if userClient != nil {
+		_ = userClient.Stop()
+	}
+
+	// Cancel all remaining active tasks and cleanup
+	task.GlobalManager.CancelAll("all", 0, true)
+	log.Println("✅ All active tasks stopped and resources cleared. Goodbye!")
 }
