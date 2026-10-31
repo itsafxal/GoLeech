@@ -41,6 +41,8 @@ type Task struct {
 	UserName       string             `json:"user_name"`
 	ChatID         int64              `json:"chat_id"`
 	MessageID      int32              `json:"message_id"`
+	QueueChatID    int64              `json:"queue_chat_id"`
+	QueueMessageID int32              `json:"queue_message_id"`
 	Name           string             `json:"name"`
 	Type           TaskType           `json:"type"`
 	Status         TaskStatus         `json:"status"`
@@ -57,6 +59,30 @@ type Task struct {
 	Ctx        context.Context    `json:"-"`
 	CancelFunc context.CancelFunc `json:"-"`
 	mu         sync.RWMutex
+}
+
+// TaskSnapshot represents an immutable thread-safe copy of task state
+type TaskSnapshot struct {
+	GID            string             `json:"gid"`
+	UserID         int64              `json:"user_id"`
+	UserName       string             `json:"user_name"`
+	ChatID         int64              `json:"chat_id"`
+	MessageID      int32              `json:"message_id"`
+	QueueChatID    int64              `json:"queue_chat_id"`
+	QueueMessageID int32              `json:"queue_message_id"`
+	Name           string             `json:"name"`
+	Type           TaskType           `json:"type"`
+	Status         TaskStatus         `json:"status"`
+	Engine         string             `json:"engine"`
+	TotalSize      int64              `json:"total_size"`
+	ProcessedBytes int64              `json:"processed_bytes"`
+	Speed          float64            `json:"speed"`
+	ETA            int64              `json:"eta"`
+	StartTime      time.Time          `json:"start_time"`
+	Options        *utils.TaskOptions `json:"options"`
+	LocalPath      string             `json:"local_path"`
+	ErrorMsg       string             `json:"error_msg"`
+	ProgressPct    float64            `json:"progress_pct"`
 }
 
 func GenerateGID() string {
@@ -167,5 +193,60 @@ func (t *Task) IsCancelled() bool {
 		t.mu.RLock()
 		defer t.mu.RUnlock()
 		return t.Status == StatusCancelled
+	}
+}
+
+func (t *Task) GetStatus() TaskStatus {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.Status
+}
+
+func (t *Task) SetQueueMessage(chatID int64, msgID int32) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.QueueChatID = chatID
+	t.QueueMessageID = msgID
+}
+
+func (t *Task) GetQueueMessage() (int64, int32) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.QueueChatID, t.QueueMessageID
+}
+
+func (t *Task) GetSnapshot() TaskSnapshot {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	pct := 0.0
+	if t.TotalSize > 0 {
+		pct = (float64(t.ProcessedBytes) / float64(t.TotalSize)) * 100.0
+		if pct > 100.0 {
+			pct = 100.0
+		}
+	}
+
+	return TaskSnapshot{
+		GID:            t.GID,
+		UserID:         t.UserID,
+		UserName:       t.UserName,
+		ChatID:         t.ChatID,
+		MessageID:      t.MessageID,
+		QueueChatID:    t.QueueChatID,
+		QueueMessageID: t.QueueMessageID,
+		Name:           t.Name,
+		Type:           t.Type,
+		Status:         t.Status,
+		Engine:         t.Engine,
+		TotalSize:      t.TotalSize,
+		ProcessedBytes: t.ProcessedBytes,
+		Speed:          t.Speed,
+		ETA:            t.ETA,
+		StartTime:      t.StartTime,
+		Options:        t.Options,
+		LocalPath:      t.LocalPath,
+		ErrorMsg:       t.ErrorMsg,
+		ProgressPct:    pct,
 	}
 }

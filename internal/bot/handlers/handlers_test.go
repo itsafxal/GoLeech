@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GoLeech/GoLeech/internal/task"
 	"github.com/GoLeech/GoLeech/pkg/typography"
 )
 
@@ -98,6 +99,73 @@ func TestPendingUserInput(t *testing.T) {
 	ClearPendingInput(uid)
 	if GetPendingInput(uid) != nil {
 		t.Errorf("expected pending state to be cleared")
+	}
+}
+
+func TestRenderQueueTaskMessage(t *testing.T) {
+	// 1. Queued task
+	snapQueued := task.TaskSnapshot{
+		GID:       "test1234",
+		Name:      "ubuntu-22.04.iso",
+		Type:      task.TypeLeech,
+		Engine:    "HTTP",
+		Status:    task.StatusQueuedDL,
+		TotalSize: 1073741824,
+	}
+	textQ, markupQ := RenderQueueTaskMessage(snapQueued, "")
+	if textQ == "" || !strings.Contains(textQ, "ubuntu-22.04.iso") {
+		t.Errorf("expected task name in queued message: %s", textQ)
+	}
+	if markupQ == nil {
+		t.Errorf("expected markup with Cancel and Force Start buttons for queued task")
+	}
+
+	// 2. Downloading task
+	snapDl := task.TaskSnapshot{
+		GID:            "test1234",
+		Name:           "ubuntu-22.04.iso",
+		Type:           task.TypeLeech,
+		Engine:         "HTTP",
+		Status:         task.StatusDownloading,
+		TotalSize:      1073741824,
+		ProcessedBytes: 536870912,
+		Speed:          10485760,
+		ETA:            50,
+		ProgressPct:    50.0,
+	}
+	textDl, markupDl := RenderQueueTaskMessage(snapDl, "")
+	if textDl == "" || !strings.Contains(textDl, "50.0%") {
+		t.Errorf("expected 50.0%% in download message: %s", textDl)
+	}
+	if markupDl == nil {
+		t.Errorf("expected cancel button for downloading task")
+	}
+
+	// 3. Completed task with Cloud URL
+	snapDone := task.TaskSnapshot{
+		GID:       "test1234",
+		Name:      "ubuntu-22.04.iso",
+		Type:      task.TypeMirror,
+		Engine:    "Pixeldrain",
+		Status:    task.StatusCompleted,
+		TotalSize: 1073741824,
+	}
+	textDone, _ := RenderQueueTaskMessage(snapDone, "https://pixeldrain.com/u/abc12345")
+	if !strings.Contains(textDone, "https://pixeldrain.com/u/abc12345") {
+		t.Errorf("expected cloud link in completed message: %s", textDone)
+	}
+}
+
+func TestThumbnailStatusIndicator(t *testing.T) {
+	expected := typography.ToSmallCaps("Custom Thumbnail")
+	textLeech, _ := GetUserSettingsFull(11223344, "leech")
+	if !strings.Contains(textLeech, expected) {
+		t.Errorf("expected '%s' indicator in leech settings: %s", expected, textLeech)
+	}
+
+	textThumb, _ := GetUserSettingsFull(11223344, "thumb")
+	if !strings.Contains(textThumb, expected) {
+		t.Errorf("expected '%s' indicator in thumb settings: %s", expected, textThumb)
 	}
 }
 

@@ -118,6 +118,11 @@ func main() {
 		bot.RegisterRoutes(botClient)
 		log.Println("📡 Telegram command handlers & callback router registered")
 
+		// Automatically register all supported commands with Telegram native command menu
+		if err := bot.RegisterBotCommands(botClient); err != nil {
+			log.Printf("⚠️ Automatic bot command registration failed: %v", err)
+		}
+
 		// 6. Initialize Plugin Registry
 		pluginReg := plugin.InitRegistry(botClient)
 		_ = pluginReg.RegisterPlugin(context.Background(), &plugin.MediaInfoPlugin{})

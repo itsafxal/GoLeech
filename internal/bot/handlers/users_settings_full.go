@@ -453,13 +453,25 @@ func buildUserSettingsFull(userID int64, page string) (string, tg.ReplyMarkup) {
 		return text, markup
 
 	case "leech":
-		docType := "MEDIA"
-		docToggle := "Send As Document"
-		docTarget := "t"
-		if st.AsDoc {
-			docType = "DOCUMENT"
-			docToggle = "Send As Media"
-			docTarget = "f"
+		docType := "DOCUMENT"
+		docToggle := "Send As Media"
+		docTarget := "f"
+		if !st.AsDoc {
+			docType = "MEDIA"
+			docToggle = "Send As Document"
+			docTarget = "t"
+		}
+
+		thumbStatus := "❌ <i>Not Set</i>"
+		thumbBtnStatus := "❌ Not Set"
+		if st.ThumbPath != "" {
+			if strings.HasPrefix(st.ThumbPath, "http://") || strings.HasPrefix(st.ThumbPath, "https://") {
+				thumbStatus = "✅ <i>Configured (URL)</i>"
+				thumbBtnStatus = "✅ Set"
+			} else if _, err := os.Stat(st.ThumbPath); err == nil {
+				thumbStatus = "✅ <i>Configured</i>"
+				thumbBtnStatus = "✅ Set"
+			}
 		}
 
 		eqSplits := st.Get("EQUAL_SPLITS") == "true"
@@ -485,6 +497,7 @@ func buildUserSettingsFull(userID int64, page string) (string, tg.ReplyMarkup) {
 		text := fmt.Sprintf(`⚜ <b><u>Leech Settings</u></b>
 │
 ┠ <b>Leech Type:</b> <b>%s</b>
+┠ <b>Custom Thumbnail:</b> %s
 ┠ <b>Leech Split Size:</b> <b>%s</b>
 ┠ <b>Equal Splits:</b> <b>%s</b>
 ┠ <b>Media Group:</b> <b>%s</b>
@@ -493,6 +506,7 @@ func buildUserSettingsFull(userID int64, page string) (string, tg.ReplyMarkup) {
 ┠ <b>Leech Caption:</b> %s
 ┖ <b>Leech Dump Chats:</b> %s`,
 			docType,
+			thumbStatus,
 			formatSplit(st.SplitSize),
 			eqLabel,
 			mgLabel,
@@ -504,7 +518,7 @@ func buildUserSettingsFull(userID int64, page string) (string, tg.ReplyMarkup) {
 
 		markup := tg.Button.Keyboard(
 			tg.Button.Row(
-				tg.Button.Data("🖼 Thumbnail Settings", fmt.Sprintf("userset %d thumb", userID)),
+				tg.Button.Data(fmt.Sprintf("🖼 Thumbnail Settings (%s)", thumbBtnStatus), fmt.Sprintf("userset %d thumb", userID)),
 			),
 			tg.Button.Row(
 				tg.Button.Data("📏 Leech Split Size", fmt.Sprintf("userset %d menu LEECH_SPLIT_SIZE", userID)),
@@ -533,9 +547,14 @@ func buildUserSettingsFull(userID int64, page string) (string, tg.ReplyMarkup) {
 
 	case "thumb":
 		hasThumb := false
+		thumbStatus := "❌ <i>Not Set</i>"
 		if st.ThumbPath != "" {
-			if _, err := os.Stat(st.ThumbPath); err == nil {
+			if strings.HasPrefix(st.ThumbPath, "http://") || strings.HasPrefix(st.ThumbPath, "https://") {
 				hasThumb = true
+				thumbStatus = "✅ <i>Configured (URL)</i>"
+			} else if _, err := os.Stat(st.ThumbPath); err == nil {
+				hasThumb = true
+				thumbStatus = "✅ <i>Configured</i>"
 			}
 		}
 
@@ -556,10 +575,10 @@ func buildUserSettingsFull(userID int64, page string) (string, tg.ReplyMarkup) {
 
 		text := fmt.Sprintf(`⚜ <b><u>Thumbnail Settings</u></b>
 │
-┠ <b>Custom Thumbnail:</b> <b>%s</b>
+┠ <b>Custom Thumbnail:</b> %s
 ┠ <b>Auto Thumbnail:</b> <b>%s</b>
 ┖ <b>Layout:</b> <b>%s</b>`,
-			formatBool(hasThumb, "Exists ✅", "Not Exists ❌"),
+			thumbStatus,
 			atLabel,
 			layout,
 		)

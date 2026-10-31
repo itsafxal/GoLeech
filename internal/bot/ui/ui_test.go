@@ -50,3 +50,4 @@ func TestUIRawPreservation(t *testing.T) {
 		t.Errorf("expected bot text to be in small caps, got: %s", formatted)
 	}
 }
+

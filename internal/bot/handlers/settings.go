@@ -158,7 +158,19 @@ func HandleCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 		return HandleImageCallback(cb, botClient)
 	}
 
-	// 1. Task Cancellation
+	// 1. Task Cancellation & Force Start
+	if strings.HasPrefix(data, "task:fs:") {
+		gid := strings.TrimPrefix(data, "task:fs:")
+		isSudo := auth.IsSudo(senderID)
+		success, msg := task.GlobalManager.ForceStartTask(gid, senderID, isSudo)
+		if success {
+			_, _ = ui.Answer(cb, "⚡️ Task promoted to run immediately!", &tg.CallbackOptions{Alert: false})
+		} else {
+			_, _ = ui.Answer(cb, msg, &tg.CallbackOptions{Alert: true})
+		}
+		return nil
+	}
+
 	if strings.HasPrefix(data, "cancel:") {
 		gid := strings.TrimPrefix(data, "cancel:")
 		isSudo := auth.IsSudo(senderID)

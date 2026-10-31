@@ -41,6 +41,7 @@ type Config struct {
 	RcloneServeURL       string  `json:"rclone_serve_url"`
 	RssDelay             int     `json:"rss_delay"`
 	CmdSuffix            string  `json:"cmd_suffix"`
+	LeechAsDocument      bool    `json:"leech_as_document"`
 	DisableLeech         bool    `json:"disable_leech"`
 	DisableMirror        bool    `json:"disable_mirror"`
 	DisableTorrents      bool    `json:"disable_torrents"`
@@ -64,6 +65,7 @@ func LoadConfig() *Config {
 		StatusUpdateInterval: 10,
 		WebPort:              8080,
 		DefaultUpload:        "tg",
+		LeechAsDocument:      true,
 		LeechSplitSize:       2097152000, // 2GB - 2MB safety margin
 		RssDelay:             600,
 	}
@@ -162,6 +164,11 @@ func LoadConfig() *Config {
 	}
 	if val := os.Getenv("CMD_SUFFIX"); val != "" {
 		cfg.CmdSuffix = val
+	}
+	if val := os.Getenv("LEECH_AS_DOCUMENT"); val != "" {
+		cfg.LeechAsDocument = (val != "false" && val != "0" && val != "no")
+	} else if val := os.Getenv("AS_DOCUMENT"); val != "" {
+		cfg.LeechAsDocument = (val != "false" && val != "0" && val != "no")
 	}
 
 	configMutex.Lock()

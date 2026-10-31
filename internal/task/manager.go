@@ -130,12 +130,6 @@ func (m *Manager) RemoveTask(gid string) {
 // AcquireDownloadSlot waits until download concurrency limits allow running
 func (m *Manager) AcquireDownloadSlot(t *Task) error {
 	cfg := config.Get()
-	if t.Options != nil && t.Options.ForceStart {
-		m.queueMu.Lock()
-		m.dlRunning++
-		m.queueMu.Unlock()
-		return nil
-	}
 
 	for {
 		if t.IsCancelled() {
@@ -144,11 +138,15 @@ func (m *Manager) AcquireDownloadSlot(t *Task) error {
 
 		m.queueMu.Lock()
 		canRun := true
-		if cfg.QueueDownload > 0 && m.dlRunning >= cfg.QueueDownload {
-			canRun = false
-		}
-		if cfg.QueueAll > 0 && (m.dlRunning+m.upRunning) >= cfg.QueueAll {
-			canRun = false
+		if t.Options != nil && t.Options.ForceStart {
+			canRun = true
+		} else {
+			if cfg.QueueDownload > 0 && m.dlRunning >= cfg.QueueDownload {
+				canRun = false
+			}
+			if cfg.QueueAll > 0 && (m.dlRunning+m.upRunning) >= cfg.QueueAll {
+				canRun = false
+			}
 		}
 
 		if canRun {
@@ -177,13 +175,6 @@ func (m *Manager) ReleaseDownloadSlot() {
 // AcquireUploadSlot waits until upload concurrency limits allow running
 func (m *Manager) AcquireUploadSlot(t *Task) error {
 	cfg := config.Get()
-	if t.Options != nil && t.Options.ForceStart {
-		m.queueMu.Lock()
-		m.upRunning++
-		m.queueMu.Unlock()
-		return nil
-	}
-
 	t.SetStatus(StatusQueuedUP)
 
 	for {
@@ -193,11 +184,15 @@ func (m *Manager) AcquireUploadSlot(t *Task) error {
 
 		m.queueMu.Lock()
 		canRun := true
-		if cfg.QueueUpload > 0 && m.upRunning >= cfg.QueueUpload {
-			canRun = false
-		}
-		if cfg.QueueAll > 0 && (m.dlRunning+m.upRunning) >= cfg.QueueAll {
-			canRun = false
+		if t.Options != nil && t.Options.ForceStart {
+			canRun = true
+		} else {
+			if cfg.QueueUpload > 0 && m.upRunning >= cfg.QueueUpload {
+				canRun = false
+			}
+			if cfg.QueueAll > 0 && (m.dlRunning+m.upRunning) >= cfg.QueueAll {
+				canRun = false
+			}
 		}
 
 		if canRun {

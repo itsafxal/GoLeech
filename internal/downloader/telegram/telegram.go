@@ -14,11 +14,15 @@ import (
 )
 
 type Downloader struct {
-	client *tg.Client
+	client     *tg.Client
+	userClient *tg.Client
 }
 
-func NewDownloader(client *tg.Client) *Downloader {
-	return &Downloader{client: client}
+func NewDownloader(client, userClient *tg.Client) *Downloader {
+	return &Downloader{
+		client:     client,
+		userClient: userClient,
+	}
 }
 
 // DownloadMedia downloads a Telegram message's attached media directly via MTProto
@@ -35,8 +39,10 @@ func (d *Downloader) DownloadMedia(ctx context.Context, msg *tg.NewMessage, t *t
 	t.LocalPath = taskDir
 
 	filename := t.Options.Name
-	if filename == "" {
-		if doc := msg.Document(); doc != nil {
+	var fileSize int64
+	if doc := msg.Document(); doc != nil {
+		fileSize = doc.Size
+		if filename == "" {
 			for _, attr := range doc.Attributes {
 				if fName, ok := attr.(*tg.DocumentAttributeFilename); ok {
 					filename = fName.FileName
@@ -45,6 +51,10 @@ func (d *Downloader) DownloadMedia(ctx context.Context, msg *tg.NewMessage, t *t
 			}
 		}
 	}
+	if fileSize > 0 {
+		t.TotalSize = fileSize
+	}
+
 	if filename == "" {
 		filename = fmt.Sprintf("tg_%d_%d.bin", msg.ChatID(), msg.ID)
 	}
@@ -65,7 +75,20 @@ func (d *Downloader) DownloadMedia(ctx context.Context, msg *tg.NewMessage, t *t
 		},
 	}
 
-	savedPath, err := msg.Download(opts)
+	var savedPath string
+	var err error
+
+	// If file is > 2GB (Premium size) and user client is connected, prefer user client
+	if fileSize > 2097152000 && d.userClient != nil {
+		savedPath, err = d.userClient.DownloadMedia(msg.Media, opts)
+	} else {
+		savedPath, err = msg.Download(opts)
+		if err != nil && d.userClient != nil {
+			// Fallback to user client if bot download hit restriction
+			savedPath, err = d.userClient.DownloadMedia(msg.Media, opts)
+		}
+	}
+
 	if err != nil {
 		return "", fmt.Errorf("telegram download failed: %w", err)
 	}

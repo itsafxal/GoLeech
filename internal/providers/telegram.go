@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/GoLeech/GoLeech/internal/config"
@@ -43,13 +44,24 @@ func (u *TelegramUploader) Upload(ctx context.Context, t *task.Task, filePath st
 		uSettings, _ = db.GlobalStore.GetUserSettings(t.UserID)
 	}
 
-	// Split size check
-	splitLimit := cfg.LeechSplitSize
+	// Split size check adhering to active client limits (2GB Standard Bot / 4GB Premium User)
+	maxClientLimit := int64(2097152000)
 	if u.userClient != nil {
-		splitLimit = 4194304000 // 4GB for Telegram Premium User session
+		maxClientLimit = 4194304000
 	}
-	if t.Options.SplitSize > 0 {
+
+	splitLimit := maxClientLimit
+	if cfg.LeechSplitSize > 0 && cfg.LeechSplitSize <= maxClientLimit {
+		splitLimit = cfg.LeechSplitSize
+	}
+	if uSettings != nil && uSettings.SplitSize > 0 && uSettings.SplitSize <= maxClientLimit {
+		splitLimit = uSettings.SplitSize
+	}
+	if t.Options.SplitSize > 0 && t.Options.SplitSize <= maxClientLimit {
 		splitLimit = t.Options.SplitSize
+	}
+	if splitLimit <= 0 || splitLimit > maxClientLimit {
+		splitLimit = maxClientLimit
 	}
 
 	equalSplits := false
@@ -75,9 +87,13 @@ func (u *TelegramUploader) Upload(ctx context.Context, t *task.Task, filePath st
 			return nil, err
 		}
 
-		isDoc := t.Options.AsDocument
-		if uSettings != nil && uSettings.AsDoc && !t.Options.AsMedia {
+		isDoc := true
+		if t.Options.AsMedia {
+			isDoc = false
+		} else if t.Options.AsDocument {
 			isDoc = true
+		} else if uSettings != nil {
+			isDoc = uSettings.AsDoc
 		}
 
 		partName := filepath.Base(partPath)
@@ -137,13 +153,34 @@ func (u *TelegramUploader) Upload(ctx context.Context, t *task.Task, filePath st
 			mediaOpts.ForceDocument = true
 		}
 
-		// Use user client if available and premium file size, else bot client
+		// Use user client if available and premium file size (> 2GB), else standard bot client
 		clientToUse := u.client
 		if u.userClient != nil && info.Size() > 2097152000 {
 			clientToUse = u.userClient
 		}
 
 		sentMsg, err := clientToUse.SendMedia(targetChatID, partPath, mediaOpts)
+		if err != nil && clientToUse == u.userClient {
+			// Fallback: If user client cannot send directly to targetChatID (e.g. peer restriction in private chats),
+			// upload to dump channel or log chat and forward via the bot client
+			dumpTarget := cfg.LeechLogChat
+			if t.Options.DumpChat != "" {
+				if dID, dErr := strconv.ParseInt(t.Options.DumpChat, 10, 64); dErr == nil {
+					dumpTarget = dID
+				}
+			}
+			if dumpTarget != 0 {
+				dumpMsg, dErr := u.userClient.SendMedia(dumpTarget, partPath, mediaOpts)
+				if dErr == nil && dumpMsg != nil {
+					fwdMsgs, fwdErr := u.client.Forward(targetChatID, dumpTarget, []int32{dumpMsg.ID})
+					if fwdErr == nil && len(fwdMsgs) > 0 {
+						sentMsg = &fwdMsgs[0]
+						err = nil
+					}
+				}
+			}
+		}
+
 		if err != nil {
 			return nil, fmt.Errorf("failed to upload part %s to telegram: %w", partName, err)
 		}

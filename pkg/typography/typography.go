@@ -173,3 +173,4 @@ func FormatMarkup(markup tg.ReplyMarkup) tg.ReplyMarkup {
 
 	return inlineMarkup
 }
+

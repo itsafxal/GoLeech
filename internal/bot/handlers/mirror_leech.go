@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/GoLeech/GoLeech/internal/auth"
@@ -52,11 +53,20 @@ func processTask(m *tg.NewMessage, tType task.TaskType, botClient, userClient *t
 	opts := utils.ParseTaskOptions(m.Args())
 
 	// Apply user personal defaults if flags not explicitly passed
+	if !opts.AsDocument && !opts.AsMedia {
+		if db.GlobalStore != nil {
+			if st, _ := db.GlobalStore.GetUserSettings(senderID); st != nil {
+				opts.AsDocument = st.AsDoc
+			} else {
+				opts.AsDocument = cfg.LeechAsDocument
+			}
+		} else {
+			opts.AsDocument = cfg.LeechAsDocument
+		}
+	}
+
 	if db.GlobalStore != nil {
 		if st, _ := db.GlobalStore.GetUserSettings(senderID); st != nil {
-			if !opts.AsDocument && !opts.AsMedia && st.AsDoc {
-				opts.AsDocument = true
-			}
 			if opts.SplitSize == 0 && st.SplitSize > 0 {
 				opts.SplitSize = st.SplitSize
 			}
@@ -96,36 +106,99 @@ func processTask(m *tg.NewMessage, tType task.TaskType, botClient, userClient *t
 	t := task.NewTask(senderID, userName, chatID, m.ID, tType, opts)
 	task.GlobalManager.AddTask(t)
 
-	// Send initial confirmation
-	notifyMsg, err := ui.Reply(m, fmt.Sprintf("⏳ <b>Task Added to Queue:</b>\n┠ <b>GID:</b> <code>%s</code>\n┠ <b>Type:</b> <i>%s</i>\n┖ <b>Name:</b> <code><raw>%s</raw></code>", t.GID, t.Type, t.Name), &tg.SendOptions{
-		ReplyMarkup: ui.Button.Keyboard(
-			ui.Button.Row(
-				ui.Button.Data("🚫 Cancel Task", fmt.Sprintf("cancel:%s", t.GID)),
-			),
-		),
+	// Send initial confirmation with interactive queue card
+	initialText, initialMarkup := RenderQueueTaskMessage(t.GetSnapshot(), "")
+	notifyMsg, err := ui.Reply(m, initialText, &tg.SendOptions{
+		ReplyMarkup: initialMarkup,
 	})
 	if err == nil && notifyMsg != nil {
+		t.SetQueueMessage(m.ChatID(), notifyMsg.ID)
 		t.MessageID = notifyMsg.ID
 	}
 
 	// Launch async task pipeline in dedicated goroutine
-	go runTaskPipeline(t, m, replyMsg, botClient, userClient)
+	go runTaskPipeline(t, m, notifyMsg, replyMsg, botClient, userClient)
 
 	return nil
 }
 
-func runTaskPipeline(t *task.Task, origMsg, replyMsg *tg.NewMessage, botClient, userClient *tg.Client) {
+func runTaskPipeline(t *task.Task, origMsg, notifyMsg, replyMsg *tg.NewMessage, botClient, userClient *tg.Client) {
+	var lastEditedText string
+	updateQueueCard := func(force bool) {
+		if notifyMsg == nil {
+			return
+		}
+		snap := t.GetSnapshot()
+		text, markup := RenderQueueTaskMessage(snap, "")
+		if !force && text == lastEditedText {
+			return
+		}
+		_, err := ui.EditMsg(notifyMsg, text, &tg.SendOptions{
+			ReplyMarkup: markup,
+		})
+		if err == nil {
+			lastEditedText = text
+		}
+	}
+
+	// Start live progress updater ticker (updates every 2.5 seconds during active transfer)
+	stopTicker := make(chan struct{})
+	var tickerWg sync.WaitGroup
+	tickerWg.Add(1)
+
+	go func() {
+		defer tickerWg.Done()
+		ticker := time.NewTicker(2500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-stopTicker:
+				return
+			case <-ticker.C:
+				st := t.GetStatus()
+				if st == task.StatusCompleted || st == task.StatusFailed || st == task.StatusCancelled {
+					return
+				}
+				updateQueueCard(false)
+			}
+		}
+	}()
+
+	finalize := func(cloudURL string) {
+		close(stopTicker)
+		tickerWg.Wait()
+
+		snap := t.GetSnapshot()
+		finalText, finalMarkup := RenderQueueTaskMessage(snap, cloudURL)
+		if notifyMsg != nil {
+			_, err := ui.EditMsg(notifyMsg, finalText, &tg.SendOptions{
+				ReplyMarkup: finalMarkup,
+			})
+			if err != nil {
+				_, _ = ui.Reply(origMsg, finalText, &tg.SendOptions{
+					ReplyMarkup: finalMarkup,
+				})
+			}
+		} else {
+			_, _ = ui.Reply(origMsg, finalText, &tg.SendOptions{
+				ReplyMarkup: finalMarkup,
+			})
+		}
+	}
+
 	defer func() {
 		task.GlobalManager.RemoveTask(t.GID)
 		if r := recover(); r != nil {
 			t.SetError(fmt.Errorf("panic in task pipeline: %v", r))
+			finalize("")
 		}
 	}()
 
 	// 1. Acquire Download Slot
 	if err := task.GlobalManager.AcquireDownloadSlot(t); err != nil {
 		t.SetError(err)
-		_, _ = ui.Reply(origMsg, fmt.Sprintf("❌ Task <code>%s</code> failed to start: <raw>%v</raw>", t.GID, err))
+		finalize("")
 		return
 	}
 	defer task.GlobalManager.ReleaseDownloadSlot()
@@ -133,6 +206,7 @@ func runTaskPipeline(t *task.Task, origMsg, replyMsg *tg.NewMessage, botClient, 
 	t.SetStatus(task.StatusDownloading)
 	engineName := downloader.DetectEngine(t.Options.Link)
 	t.SetEngine(engineName)
+	updateQueueCard(true)
 
 	var downloadedPath string
 	var dlErr error
@@ -145,7 +219,7 @@ func runTaskPipeline(t *task.Task, origMsg, replyMsg *tg.NewMessage, botClient, 
 	switch {
 	case t.Options.Link == "tg://media" && replyMsg != nil && replyMsg.IsMedia():
 		t.SetEngine("Telegram")
-		tgDL := dlTG.NewDownloader(botClient)
+		tgDL := dlTG.NewDownloader(botClient, userClient)
 		downloadedPath, dlErr = tgDL.DownloadMedia(t.Ctx, replyMsg, t, progressCb)
 
 	case engineName == "Torrent":
@@ -166,7 +240,7 @@ func runTaskPipeline(t *task.Task, origMsg, replyMsg *tg.NewMessage, botClient, 
 
 	if dlErr != nil {
 		t.SetError(dlErr)
-		_, _ = ui.Reply(origMsg, fmt.Sprintf("❌ Download failed for <code><raw>%s</raw></code>:\n<code><raw>%v</raw></code>", t.Name, dlErr))
+		finalize("")
 		return
 	}
 
@@ -193,6 +267,7 @@ func runTaskPipeline(t *task.Task, origMsg, replyMsg *tg.NewMessage, botClient, 
 	// Extract archive if requested (-e)
 	if t.Options.Extract {
 		t.SetStatus(task.StatusExtracting)
+		updateQueueCard(true)
 		extractDir := filepath.Join(filepath.Dir(downloadedPath), "extracted")
 		if err := media.ExtractArchive(t.Ctx, downloadedPath, extractDir); err == nil {
 			workPath = extractDir
@@ -202,6 +277,7 @@ func runTaskPipeline(t *task.Task, origMsg, replyMsg *tg.NewMessage, botClient, 
 	// Zip archive if requested (-z)
 	if t.Options.Zip {
 		t.SetStatus(task.StatusArchiving)
+		updateQueueCard(true)
 		zipPath := filepath.Join(filepath.Dir(downloadedPath), t.Name+".zip")
 		if err := media.CreateZip(t.Ctx, downloadedPath, zipPath); err == nil {
 			workPath = zipPath
@@ -224,6 +300,7 @@ func runTaskPipeline(t *task.Task, origMsg, replyMsg *tg.NewMessage, botClient, 
 
 	if globalMeta != "" || audioMeta != "" || videoMeta != "" || subMeta != "" {
 		t.SetStatus(task.StatusProcessing)
+		updateQueueCard(true)
 		if taggedPath, err := media.ApplyMetadata(t.Ctx, workPath, globalMeta, audioMeta, videoMeta, subMeta); err == nil {
 			workPath = taggedPath
 		}
@@ -232,11 +309,13 @@ func runTaskPipeline(t *task.Task, origMsg, replyMsg *tg.NewMessage, botClient, 
 	// 4. Acquire Upload Slot
 	if err := task.GlobalManager.AcquireUploadSlot(t); err != nil {
 		t.SetError(err)
+		finalize("")
 		return
 	}
 	defer task.GlobalManager.ReleaseUploadSlot()
 
 	t.SetStatus(task.StatusUploading)
+	updateQueueCard(true)
 
 	// 5. Upload based on task type
 	cfg := config.Get()
@@ -272,25 +351,14 @@ func runTaskPipeline(t *task.Task, origMsg, replyMsg *tg.NewMessage, botClient, 
 
 	if upErr != nil {
 		t.SetError(upErr)
-		_, _ = ui.Reply(origMsg, fmt.Sprintf("❌ Upload failed for <code><raw>%s</raw></code>:\n<code><raw>%v</raw></code>", t.Name, upErr))
+		finalize("")
 		return
 	}
 
 	t.SetStatus(task.StatusCompleted)
-
-	// Send success completion message
-	elapsed := time.Since(t.StartTime)
-	completeText := fmt.Sprintf(`✅ <b>Task Completed!</b>
-│
-┠ <b>Name:</b> <code><raw>%s</raw></code>
-┠ <b>Size:</b> <i>%s</i>
-┠ <b>Type:</b> <i>%s</i>
-┠ <b>Engine:</b> <i>%s</i>
-┖ <b>Elapsed:</b> <i>%s</i>`, t.Name, utils.FormatBytes(t.TotalSize), t.Type, t.Engine, utils.FormatDuration(elapsed))
-
+	cloudURL := ""
 	if uploadRes != nil && uploadRes.URL != "" {
-		completeText += fmt.Sprintf("\n\n🔗 <b>Cloud Link:</b> <raw>%s</raw>", uploadRes.URL)
+		cloudURL = uploadRes.URL
 	}
-
-	_, _ = ui.Reply(origMsg, completeText)
+	finalize(cloudURL)
 }

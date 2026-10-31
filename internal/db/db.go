@@ -109,7 +109,7 @@ func InitDB(dbPath string) (*Store, error) {
 		suffix TEXT DEFAULT '',
 		caption TEXT DEFAULT '',
 		split_size INTEGER DEFAULT 0,
-		as_doc INTEGER DEFAULT 0,
+		as_doc INTEGER DEFAULT 1,
 		thumb_path TEXT DEFAULT '',
 		upload_dest TEXT DEFAULT ''
 	);
@@ -307,7 +307,11 @@ func (s *Store) GetBotSetting(key string) (string, error) {
 func (s *Store) GetUserSettings(userID int64) (*UserSettings, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	settings := &UserSettings{UserID: userID, ExtraData: make(map[string]string)}
+	settings := &UserSettings{
+		UserID:    userID,
+		AsDoc:     true, // Default send mode is Document
+		ExtraData: make(map[string]string),
+	}
 	var asDocInt int
 	var extraJSON string
 	err := s.db.QueryRow(`
@@ -330,12 +334,22 @@ func (s *Store) GetUserSettings(userID int64) (*UserSettings, error) {
 	if err != nil {
 		return nil, err
 	}
-	settings.AsDoc = (asDocInt == 1)
 	if extraJSON != "" {
 		_ = json.Unmarshal([]byte(extraJSON), &settings.ExtraData)
 	}
 	if settings.ExtraData == nil {
 		settings.ExtraData = make(map[string]string)
+	}
+
+	if asDocInt == 1 {
+		settings.AsDoc = true
+	} else {
+		// If asDocInt is 0, check if explicitly opted out of Document
+		if settings.Get("AS_DOCUMENT") == "false" {
+			settings.AsDoc = false
+		} else {
+			settings.AsDoc = true
+		}
 	}
 	return settings, nil
 }
@@ -349,6 +363,11 @@ func (s *Store) SaveUserSettings(st *UserSettings) error {
 	}
 	if st.ExtraData == nil {
 		st.ExtraData = make(map[string]string)
+	}
+	if !st.AsDoc {
+		st.ExtraData["AS_DOCUMENT"] = "false"
+	} else {
+		st.ExtraData["AS_DOCUMENT"] = "true"
 	}
 	extraJSON, _ := json.Marshal(st.ExtraData)
 	_, err := s.db.Exec(`
