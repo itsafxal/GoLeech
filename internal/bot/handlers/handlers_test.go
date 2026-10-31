@@ -126,17 +126,27 @@ func TestRenderQueueTaskMessage(t *testing.T) {
 		GID:            "test1234",
 		Name:           "ubuntu-22.04.iso",
 		Type:           task.TypeLeech,
-		Engine:         "HTTP",
+		Engine:         "Aria2",
 		Status:         task.StatusDownloading,
 		TotalSize:      1073741824,
 		ProcessedBytes: 536870912,
 		Speed:          10485760,
 		ETA:            50,
 		ProgressPct:    50.0,
+		Options:        &utils.TaskOptions{Link: "https://example.com/ubuntu-22.04.iso"},
 	}
 	textDl, markupDl := RenderQueueTaskMessage(snapDl, "")
 	if textDl == "" || !strings.Contains(textDl, "50.0%") {
 		t.Errorf("expected 50.0%% in download message: %s", textDl)
+	}
+	if !strings.Contains(textDl, "ᴀʀɪᴀ2") {
+		t.Errorf("expected Engine: Aria2 in message: %s", textDl)
+	}
+	if !strings.Contains(textDl, "ᴅɪʀᴇᴄᴛ ᴜʀʟ") {
+		t.Errorf("expected In Mode: Direct URL in message: %s", textDl)
+	}
+	if !strings.Contains(textDl, "ʟᴇᴇᴄʜ") {
+		t.Errorf("expected Out Mode: Leech in message: %s", textDl)
 	}
 	if markupDl == nil {
 		t.Errorf("expected cancel button for downloading task")

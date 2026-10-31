@@ -4,13 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/GoLeech/GoLeech/internal/config"
@@ -28,6 +26,12 @@ func NewDownloader() *Downloader {
 	return &Downloader{
 		client: &http.Client{
 			Timeout: 0, // No global timeout for large streaming downloads
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 15 {
+					return fmt.Errorf("stopped after 15 redirects")
+				}
+				return nil
+			},
 		},
 	}
 }
@@ -46,12 +50,15 @@ func (d *Downloader) Download(ctx context.Context, t *task.Task, onProgress down
 	}
 	t.LocalPath = taskDir
 
-	// Send HEAD or initial GET request to check headers, content length, and filename
+	// Prepare initial request
 	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("invalid download URL: %w", err)
 	}
-	req.Header.Set("User-Agent", "GoLeech/1.0 (Mozilla/5.0 Compatible)")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Connection", "keep-alive")
+
 	if t.Options.CustomHeader != "" {
 		parts := strings.SplitN(t.Options.CustomHeader, ":", 2)
 		if len(parts) == 2 {
@@ -68,8 +75,20 @@ func (d *Downloader) Download(ctx context.Context, t *task.Task, onProgress down
 	}
 	defer resp.Body.Close()
 
+	// Handle standard HTTP error statuses
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		return "", fmt.Errorf("download authentication required (HTTP 401)")
+	case http.StatusForbidden:
+		return "", fmt.Errorf("access forbidden by remote host (HTTP 403)")
+	case http.StatusNotFound:
+		return "", fmt.Errorf("file not found on remote server (HTTP 404)")
+	case http.StatusTooManyRequests:
+		return "", fmt.Errorf("rate limited by download server (HTTP 429)")
+	}
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, resp.Status)
+		return "", fmt.Errorf("download server returned HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
 
 	totalSize := resp.ContentLength
@@ -80,12 +99,14 @@ func (d *Downloader) Download(ctx context.Context, t *task.Task, onProgress down
 		}
 	}
 
-	// Resolve filename
-	filename := determineFilename(resp, rawURL, t.Options.Name)
-	t.SetName(filename)
+	// Resolve filename intelligently from Content-Disposition, final redirect URL, and query params
+	finalURL := rawURL
+	if resp.Request != nil && resp.Request.URL != nil {
+		finalURL = resp.Request.URL.String()
+	}
+	filename := DetermineFilename(resp, finalURL, t.Options.Name)
 	destPath := filepath.Join(taskDir, filename)
 
-	// Single connection streaming with progress updates
 	outFile, err := os.Create(destPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to create destination file: %w", err)
@@ -97,7 +118,10 @@ func (d *Downloader) Download(ctx context.Context, t *task.Task, onProgress down
 	lastUpdate := time.Now()
 	var lastDownloaded int64
 
-	buf := make([]byte, 64*1024) // 64KB buffer
+	buf := make([]byte, 128*1024) // 128KB buffer for high throughput
+	var sniffedHeader []byte
+	headerChecked := false
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -107,6 +131,27 @@ func (d *Downloader) Download(ctx context.Context, t *task.Task, onProgress down
 
 		n, rErr := resp.Body.Read(buf)
 		if n > 0 {
+			if !headerChecked {
+				sniffedHeader = append(sniffedHeader, buf[:min(n, 512-len(sniffedHeader))]...)
+				if len(sniffedHeader) >= 512 || rErr == io.EOF {
+					headerChecked = true
+					// Check if file has missing or script extension and fix it
+					contentType := resp.Header.Get("Content-Type")
+					ext := filepath.Ext(filename)
+					isScriptExt := ext == "" || ext == ".php" || ext == ".aspx" || ext == ".bin" || ext == ".cgi" || ext == ".do" || ext == ".jsp" || ext == ".html"
+					if isScriptExt {
+						detectedExt := utils.SniffFileExtension(sniffedHeader, contentType)
+						if detectedExt != "" && detectedExt != ext {
+							cleanBase := strings.TrimSuffix(filename, ext)
+							if cleanBase == "" || cleanBase == "attachment" || cleanBase == "download" || cleanBase == "index" {
+								cleanBase = fmt.Sprintf("file_%s", t.GID)
+							}
+							filename = cleanBase + detectedExt
+						}
+					}
+				}
+			}
+
 			if _, wErr := outFile.Write(buf[:n]); wErr != nil {
 				return "", fmt.Errorf("error writing to disk: %w", wErr)
 			}
@@ -132,91 +177,79 @@ func (d *Downloader) Download(ctx context.Context, t *task.Task, onProgress down
 		}
 	}
 
-	// Final progress update
+	// Close output file so we can rename if needed
+	_ = outFile.Close()
+
+	// If filename changed after sniffing, rename file
+	finalPath := filepath.Join(taskDir, filename)
+	if finalPath != destPath {
+		_ = os.Rename(destPath, finalPath)
+	}
+	t.SetName(filename)
+
 	duration := time.Since(startTime).Seconds()
 	avgSpeed := float64(downloaded) / duration
 	if onProgress != nil {
 		onProgress(downloaded, downloaded, avgSpeed)
 	}
 
-	return destPath, nil
+	return finalPath, nil
 }
 
-func determineFilename(resp *http.Response, rawURL, customName string) string {
+// DetermineFilename extracts the best human-readable filename from Content-Disposition, URL path, query params, or fallback
+func DetermineFilename(resp *http.Response, rawURL, customName string) string {
 	if customName != "" {
 		return utils.CleanFilename(customName)
 	}
 
-	// Check Content-Disposition
-	cd := resp.Header.Get("Content-Disposition")
-	if cd != "" {
-		if _, params, err := mime.ParseMediaType(cd); err == nil {
-			if name, ok := params["filename"]; ok && name != "" {
-				return utils.CleanFilename(name)
+	// 1. Content-Disposition Header (Standard & RFC 5987/6266 UTF-8)
+	if resp != nil {
+		cd := resp.Header.Get("Content-Disposition")
+		if cd != "" {
+			if parsed := utils.ParseContentDisposition(cd); parsed != "" {
+				return parsed
 			}
 		}
 	}
 
-	// Fallback to URL path
-	parsed, err := url.Parse(rawURL)
-	if err == nil {
+	// 2. URL Path and Query Parsing
+	if parsed, err := url.Parse(rawURL); err == nil {
 		base := filepath.Base(parsed.Path)
-		if base != "" && base != "/" && base != "." {
+		ext := strings.ToLower(filepath.Ext(base))
+		isScriptExt := ext == ".php" || ext == ".aspx" || ext == ".asp" || ext == ".jsp" || ext == ".do" || ext == ".html" || ext == ".htm"
+
+		// If path base is not a script name, use it
+		if base != "" && base != "/" && base != "." && !isScriptExt {
 			return utils.CleanFilename(base)
+		}
+
+		// If path is a dynamic script, check query params: ?file=... or ?name=... or ?filename=...
+		query := parsed.Query()
+		for _, param := range []string{"file", "name", "filename", "title", "download"} {
+			if val := query.Get(param); val != "" {
+				cleanVal := filepath.Base(val)
+				if cleanVal != "" && cleanVal != "." {
+					return utils.CleanFilename(cleanVal)
+				}
+			}
+		}
+	}
+
+	// 3. Fallback to Content-Type extension
+	if resp != nil {
+		ct := resp.Header.Get("Content-Type")
+		ext := utils.SniffFileExtension(nil, ct)
+		if ext != "" {
+			return fmt.Sprintf("file_%d%s", time.Now().Unix(), ext)
 		}
 	}
 
 	return fmt.Sprintf("download_%d.bin", time.Now().Unix())
 }
 
-// MultiChunkDownloader handles parallel range downloads for servers supporting Accept-Ranges
-type MultiChunkDownloader struct {
-	concurrency int
-}
-
-func NewMultiChunkDownloader(concurrency int) *MultiChunkDownloader {
-	if concurrency <= 0 {
-		concurrency = 4
+func min(a, b int) int {
+	if a < b {
+		return a
 	}
-	return &MultiChunkDownloader{concurrency: concurrency}
-}
-
-func (m *MultiChunkDownloader) DownloadChunk(ctx context.Context, url string, start, end int64, file *os.File, counter *int64) error {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	buf := make([]byte, 32*1024)
-	offset := start
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		n, rErr := resp.Body.Read(buf)
-		if n > 0 {
-			if _, wErr := file.WriteAt(buf[:n], offset); wErr != nil {
-				return wErr
-			}
-			offset += int64(n)
-			atomic.AddInt64(counter, int64(n))
-		}
-		if rErr != nil {
-			if rErr == io.EOF {
-				break
-			}
-			return rErr
-		}
-	}
-	return nil
+	return b
 }

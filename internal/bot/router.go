@@ -13,6 +13,7 @@ import (
 	"github.com/GoLeech/GoLeech/internal/bot/ui"
 	"github.com/GoLeech/GoLeech/internal/config"
 	"github.com/GoLeech/GoLeech/internal/db"
+	"github.com/GoLeech/GoLeech/internal/downloader"
 	"github.com/GoLeech/GoLeech/pkg/typography"
 	tg "github.com/amarnathcjd/gogram/telegram"
 )
@@ -127,6 +128,14 @@ func RegisterRoutes(botClient *tg.Client) {
 						),
 					),
 				})
+			}
+		}
+
+		// Private Chat: Auto-Leech for direct HTTP/HTTPS URLs, Torrents, or Telegram Media
+		if m.ChatID() == m.SenderID() && !m.IsCommand() {
+			src := downloader.ClassifySource(m, nil, "")
+			if src.Type != downloader.SourceTypeNone {
+				return handlers.HandleLeech(m, botClient, GetUserClient())
 			}
 		}
 

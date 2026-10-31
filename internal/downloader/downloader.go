@@ -16,11 +16,11 @@ type Downloader interface {
 // DetectEngine selects the appropriate downloader engine name for an input link
 func DetectEngine(link string) string {
 	linkLower := strings.ToLower(link)
-	if strings.HasPrefix(linkLower, "magnet:?") || strings.HasSuffix(linkLower, ".torrent") {
-		return "Torrent"
-	}
 	if strings.Contains(linkLower, "t.me/") || strings.HasPrefix(linkLower, "tg://") {
 		return "Telegram"
+	}
+	if strings.HasPrefix(linkLower, "magnet:?") || strings.HasSuffix(linkLower, ".torrent") {
+		return "Aria2"
 	}
 	if strings.Contains(linkLower, "youtube.com/") || strings.Contains(linkLower, "youtu.be/") ||
 		strings.Contains(linkLower, "instagram.com/") || strings.Contains(linkLower, "tiktok.com/") ||
@@ -33,5 +33,5 @@ func DetectEngine(link string) string {
 	if strings.Contains(linkLower, "mega.nz") {
 		return "Mega"
 	}
-	return "HTTP"
+	return "Aria2"
 }

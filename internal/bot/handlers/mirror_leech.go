@@ -13,9 +13,8 @@ import (
 	"github.com/GoLeech/GoLeech/internal/config"
 	"github.com/GoLeech/GoLeech/internal/db"
 	"github.com/GoLeech/GoLeech/internal/downloader"
-	dlHTTP "github.com/GoLeech/GoLeech/internal/downloader/http"
+	dlAria "github.com/GoLeech/GoLeech/internal/downloader/aria2"
 	dlTG "github.com/GoLeech/GoLeech/internal/downloader/telegram"
-	dlTor "github.com/GoLeech/GoLeech/internal/downloader/torrent"
 	dlYT "github.com/GoLeech/GoLeech/internal/downloader/ytdlp"
 	"github.com/GoLeech/GoLeech/internal/media"
 	"github.com/GoLeech/GoLeech/internal/providers"
@@ -83,13 +82,13 @@ func processTask(m *tg.NewMessage, tType task.TaskType, botClient, userClient *t
 		}
 	}
 
-	// Check if replied message contains media or links
+	// Check if message or replied message contains media or links via centralized classifier
 	replyMsg, _ := m.GetReplyMessage()
-	if replyMsg != nil {
-		if replyMsg.IsMedia() {
-			opts.Link = "tg://media"
-		} else if opts.Link == "" && replyMsg.Text() != "" {
-			opts.Link = strings.TrimSpace(replyMsg.Text())
+	src := downloader.ClassifySource(m, replyMsg, opts.Link)
+	if src.Type != downloader.SourceTypeNone {
+		opts.Link = src.Link
+		if src.MediaMsg != nil && replyMsg == nil {
+			replyMsg = src.MediaMsg
 		}
 	}
 
@@ -226,15 +225,10 @@ func runTaskPipeline(t *task.Task, origMsg, notifyMsg, replyMsg *tg.NewMessage, 
 
 	// 2. Execute Download based on engine
 	switch {
-	case t.Options.Link == "tg://media" && replyMsg != nil && replyMsg.IsMedia():
+	case (t.Options.Link == "tg://media" || t.Options.Link == "tg://torrent") && replyMsg != nil:
 		t.SetEngine("Telegram")
 		tgDL := dlTG.NewDownloader(botClient, userClient)
 		downloadedPath, dlErr = tgDL.DownloadMedia(t.Ctx, replyMsg, t, progressCb)
-
-	case engineName == "Torrent":
-		t.SetEngine("Torrent")
-		torDL := dlTor.NewAria2Downloader("", "")
-		downloadedPath, dlErr = torDL.Download(t.Ctx, t, progressCb)
 
 	case engineName == "yt-dlp":
 		t.SetEngine("yt-dlp")
@@ -242,9 +236,10 @@ func runTaskPipeline(t *task.Task, origMsg, notifyMsg, replyMsg *tg.NewMessage, 
 		downloadedPath, dlErr = ytDL.Download(t.Ctx, t, progressCb)
 
 	default:
-		t.SetEngine("HTTP")
-		httpDL := dlHTTP.NewDownloader()
-		downloadedPath, dlErr = httpDL.Download(t.Ctx, t, progressCb)
+		// Direct URL, Torrent, or HTTP/HTTPS -> Aria2 (with native multi-chunk fallback)
+		t.SetEngine("Aria2")
+		ariaDL := dlAria.NewDownloader("", "")
+		downloadedPath, dlErr = ariaDL.Download(t.Ctx, t, progressCb)
 	}
 
 	if dlErr != nil {

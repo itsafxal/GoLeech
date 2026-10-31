@@ -46,12 +46,28 @@ func RenderQueueTaskMessage(snap task.TaskSnapshot, cloudURL string) (string, tg
 		header = fmt.Sprintf("%s <b><u>Transmitting...</u></b>", spinner)
 	}
 
+	inMode := "Direct URL"
+	if snap.Options != nil {
+		if strings.HasPrefix(snap.Options.Link, "tg://") {
+			inMode = "Telegram Media"
+		} else if strings.HasPrefix(strings.ToLower(snap.Options.Link), "magnet:?") || strings.HasSuffix(strings.ToLower(snap.Options.Link), ".torrent") {
+			inMode = "Torrent"
+		} else if strings.EqualFold(snap.Engine, "yt-dlp") {
+			inMode = "Stream URL"
+		}
+	}
+	outMode := string(snap.Type)
+	if outMode == "" {
+		outMode = "Leech"
+	}
+
 	var sb strings.Builder
 	sb.WriteString(header + "\n│\n")
 	sb.WriteString(fmt.Sprintf("┠ <b>Task:</b> <code><raw>%s</raw></code>\n", snap.Name))
 	sb.WriteString(fmt.Sprintf("┠ <b>GID:</b> <code>%s</code>\n", snap.GID))
-	sb.WriteString(fmt.Sprintf("┠ <b>Type:</b> <i>%s</i>\n", snap.Type))
 	sb.WriteString(fmt.Sprintf("┠ <b>Engine:</b> <i>%s</i>\n", snap.Engine))
+	sb.WriteString(fmt.Sprintf("┠ <b>In Mode:</b> <i>%s</i>\n", inMode))
+	sb.WriteString(fmt.Sprintf("┠ <b>Out Mode:</b> <i>%s</i>\n", outMode))
 
 	var markup tg.ReplyMarkup
 
