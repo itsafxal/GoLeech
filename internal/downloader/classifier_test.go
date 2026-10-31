@@ -71,3 +71,4 @@ func TestDetectEngine(t *testing.T) {
 		t.Errorf("expected yt-dlp, got %s", eng)
 	}
 }
+

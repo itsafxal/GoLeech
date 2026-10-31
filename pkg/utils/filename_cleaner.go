@@ -19,12 +19,15 @@ var (
 	domainRegex = regexp.MustCompile(`(?i)\b(?:www\.)?[a-zA-Z0-9_-]+\.(?:com|org|net|in|me|co|cc|io|to|biz|info|site|vip|link|xyz|club|online|top|tv|re|pm|am|yt|ws|un|is)\b`)
 
 	// Meaningful patterns to preserve inside brackets/tags
-	yearRegex       = regexp.MustCompile(`\b(19\d{2}|20\d{2})\b`)
-	seasonEpRegex   = regexp.MustCompile(`(?i)\b(s\d{1,3}(?:e\d{1,3})?|season\s*\d+|ep(?:isode)?\s*\d+|part\s*\d+)\b`)
-	resQualityRegex = regexp.MustCompile(`(?i)\b(2160p|1440p|1080p|720p|540p|480p|360p|4k|2k|uhd|fhd|hd|sd|bluray|blu-ray|bdrip|brrip|web-dl|webdl|webrip|web|hdrip|hd-rip|dvdrip|camrip|hdcam|hdtc|remux|proper|repack|x264|x265|h264|h265|hevc|av1|10bit|8bit|hdr10\+?|hdr|dv|sdr)\b`)
-	audioCodecRegex = regexp.MustCompile(`(?i)\b(aac|ac3|eac3|ddp?\+?|dts(?:-hd)?|truehd|atmos|flac|mp3|opus|5\.1|7\.1|2\.0)\b`)
-	languageRegex   = regexp.MustCompile(`(?i)\b(tamil|telugu|hindi|english|malayalam|kannada|bengali|marathi|gujarati|punjabi|urdu|korean|japanese|chinese|spanish|french|german|russian|italian|dual\s*audio|multi\s*audio|multi\s*sub|esub|subs?)\b`)
+	yearRegex        = regexp.MustCompile(`\b(19\d{2}|20\d{2})\b`)
+	seasonEpRegex    = regexp.MustCompile(`(?i)\b(s\d{1,3}(?:e\d{1,3})?|season\s*\d+|ep(?:isode)?\s*\d+|part\s*\d+)\b`)
+	resQualityRegex  = regexp.MustCompile(`(?i)\b(2160p|1440p|1080p|720p|540p|480p|360p|4k|2k|uhd|fhd|hd|sd|bluray|blu-ray|bdrip|brrip|web-dl|webdl|webrip|web|hdrip|hd-rip|dvdrip|camrip|hdcam|hdtc|remux|proper|repack|x264|x265|h264|h265|hevc|av1|10bit|8bit|hdr10\+?|hdr|dv|sdr)\b`)
+	audioCodecRegex  = regexp.MustCompile(`(?i)\b(aac|ac3|eac3|ddp?\+?|dts(?:-hd)?|truehd|atmos|flac|mp3|opus|5\.1|7\.1|2\.0)\b`)
+	languageRegex    = regexp.MustCompile(`(?i)\b(tamil|telugu|hindi|english|malayalam|kannada|bengali|marathi|gujarati|punjabi|urdu|korean|japanese|chinese|spanish|french|german|russian|italian|dual\s*audio|multi\s*audio|multi\s*sub|esub|subs?)\b`)
 	sizePatternRegex = regexp.MustCompile(`(?i)\b\d+(?:\.\d+)?\s*(?:mb|gb)\b`)
+
+	// Protected decimal tokens (e.g. 5.1, 7.1, 2.0, H.264, H.265, v1.0) where dots must NOT be converted to spaces
+	protectedDotRegex = regexp.MustCompile(`(?i)\b(?:h\.264|h\.265|ddp?\.?5\.1|dd\.5\.1|ac3\.5\.1|v\d+\.\d+|\d+\.\d+)\b`)
 )
 
 // IsMeaningfulTag returns true if the content of a tag represents legitimate media information
@@ -86,9 +89,49 @@ func DeduplicatePrefix(filename string, userPrefix string) string {
 	return base + ext
 }
 
+// NormalizeWordSeparators replaces underscores and word-separating dots with spaces,
+// while strictly preserving meaningful decimals (e.g. 5.1, H.264) and bracketed tags.
+func NormalizeWordSeparators(base string) string {
+	// 1. Replace underscores with spaces
+	base = strings.ReplaceAll(base, "_", " ")
+
+	// 2. Protect decimals (e.g. 5.1, 7.1, 2.0, H.264, H.265) before replacing dots
+	type tokenHolder struct {
+		placeholder string
+		original    string
+	}
+	var placeholders []tokenHolder
+	counter := 0
+
+	protected := protectedDotRegex.ReplaceAllStringFunc(base, func(match string) string {
+		ph := fmt.Sprintf("@@PROT%d@@", counter)
+		counter++
+		placeholders = append(placeholders, tokenHolder{placeholder: ph, original: match})
+		return ph
+	})
+
+	// 3. Replace all remaining dots with spaces
+	spaced := strings.ReplaceAll(protected, ".", " ")
+
+	// 4. Restore protected tokens
+	for _, ph := range placeholders {
+		spaced = strings.ReplaceAll(spaced, ph.placeholder, ph.original)
+	}
+
+	// 5. Ensure clean spacing after closing brackets e.g. [CC]Title -> [CC] Title
+	reBracketSpacing := regexp.MustCompile(`([\]\}\)])([a-zA-Z0-9])`)
+	spaced = reBracketSpacing.ReplaceAllString(spaced, "$1 $2")
+
+	// 6. Ensure clean spacing before opening brackets e.g. Title[1080p] -> Title [1080p]
+	rePreBracketSpacing := regexp.MustCompile(`([a-zA-Z0-9])([\[\{\(])`)
+	spaced = rePreBracketSpacing.ReplaceAllString(spaced, "$1 $2")
+
+	return spaced
+}
+
 // CleanMediaFilename removes unwanted attribution, usernames, website watermarks,
 // and redundant duplicate source tags while strictly preserving meaningful content
-// (movie/series titles, years, resolutions, seasons, qualities, languages, and hyphens).
+// (movie/series titles, years, resolutions, seasons, qualities, languages, and existing bracketed tags like [CC]).
 func CleanMediaFilename(filename string, userPrefix string) string {
 	filename = strings.TrimSpace(filename)
 	if filename == "" {
@@ -111,7 +154,8 @@ func CleanMediaFilename(filename string, userPrefix string) string {
 	}
 	base := strings.TrimSuffix(filename, ext)
 
-	// 3. Deduplicate configured user prefix (e.g. [CC] or {CC} when prefix is [CC])
+	// 3. Deduplicate configured user prefix ONLY if a userPrefix is provided
+	// (Prevents duplicate e.g. [CC] [CC] when user prefix is [CC], but preserves [CC] if user prefix is empty or different)
 	if userPrefix != "" {
 		coreToken := ExtractCoreToken(userPrefix)
 		if coreToken != "" {
@@ -144,14 +188,14 @@ func CleanMediaFilename(filename string, userPrefix string) string {
 	reUnbrackWeb := regexp.MustCompile(`(?i)^\s*(?:www\.)?[a-zA-Z0-9_-]+\.(?:com|org|net|in|me|co|cc|io|to|biz|info|site|vip|link|xyz|club|online|top|tv|re|pm|am|yt|ws|un|is)\s*[-_:]?\s*`)
 	base = reUnbrackWeb.ReplaceAllString(base, "")
 
-	// 6. Remove leading source tags in [ ], { }, ( ), or quotes if not meaningful
-	reBrackets := regexp.MustCompile(`^\s*([\[\{\(])([^\[\]\{\}\(\)]{1,35})([\]\}\)])\s*[-_:]?\s*`)
+	// 6. Remove leading braces {SourceTag} if not meaningful
+	reBraces := regexp.MustCompile(`^\s*\{([^\{\}]{1,35})\}\s*[-_:]?\s*`)
 	for {
-		m := reBrackets.FindStringSubmatch(base)
-		if len(m) > 2 {
-			inner := strings.TrimSpace(m[2])
+		m := reBraces.FindStringSubmatch(base)
+		if len(m) > 1 {
+			inner := strings.TrimSpace(m[1])
 			if !IsMeaningfulTag(inner) {
-				loc := reBrackets.FindStringIndex(base)
+				loc := reBraces.FindStringIndex(base)
 				if loc != nil && loc[0] == 0 {
 					base = strings.TrimSpace(base[loc[1]:])
 					continue
@@ -182,7 +226,10 @@ func CleanMediaFilename(filename string, userPrefix string) string {
 	reEndUser := regexp.MustCompile(`(?i)\s*[-_:]?\s*(?:[\[\{\(]\s*)?@[a-zA-Z0-9_]{3,}(?:\s*[\]\}\)])?\s*$`)
 	base = reEndUser.ReplaceAllString(base, "")
 
-	// 9. Trim dangling leading/trailing separators while preserving internal hyphens
+	// 9. Normalize word separators: replace underscores and word dots with spaces
+	base = NormalizeWordSeparators(base)
+
+	// 10. Trim dangling leading/trailing separators while preserving internal hyphens
 	base = strings.Trim(base, " \t\r\n-_.")
 	base = regexp.MustCompile(`\s{2,}`).ReplaceAllString(base, " ")
 
@@ -218,19 +265,19 @@ func DetectLanguages(filename string) string {
 // DetectSubtitles detects subtitle tags from filename
 func DetectSubtitles(filename string) string {
 	lower := strings.ToLower(filename)
+	if strings.Contains(lower, "multi sub") || strings.Contains(lower, "multisub") || strings.Contains(lower, "multi-sub") {
+		return "Multi Sub"
+	}
 	if strings.Contains(lower, "esub") || strings.Contains(lower, "esubs") {
-		return "English (Esubs)"
+		return "English ESub"
 	}
-	if strings.Contains(lower, "msub") || strings.Contains(lower, "multi sub") {
-		return "Multi Subtitles"
+	if strings.Contains(lower, "sub") || strings.Contains(lower, "subs") {
+		return "Subtitles Available"
 	}
-	if strings.Contains(lower, "sub") || strings.Contains(lower, "subtitle") {
-		return "Available"
-	}
-	return ""
+	return "None"
 }
 
-// DetectMimeType determines the MIME type of a file based on its extension
+// DetectMimeType determines MIME content type based on extension
 func DetectMimeType(filename string) string {
 	ext := strings.ToLower(filepath.Ext(filename))
 	switch ext {

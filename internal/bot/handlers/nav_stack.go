@@ -59,6 +59,8 @@ func (n *navStackManager) GetParent(page string) string {
 		return "uphoster"
 	case "ffset":
 		return "main"
+	case "watermark":
+		return "main"
 	case "leech", "mirror", "general", "uphoster", "clone", "ytdlp", "advanced", "seedr":
 		return "main"
 	default:

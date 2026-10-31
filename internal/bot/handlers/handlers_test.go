@@ -58,7 +58,7 @@ func TestGetStatsMessage(t *testing.T) {
 
 func TestUserSettingsPages(t *testing.T) {
 	pages := []string{
-		"main", "general", "leech", "thumb", "ffset",
+		"main", "general", "leech", "thumb", "ffset", "watermark",
 		"mirror", "rclone", "gdrive", "uphoster", "gofile",
 		"buzzheavier", "pixeldrain", "devuploads", "vikingfile",
 		"advanced", "clone", "ytdlp", "mega", "seedr",
@@ -76,7 +76,7 @@ func TestUserSettingsPages(t *testing.T) {
 }
 
 func TestGetOptionMenu(t *testing.T) {
-	options := []string{"LEECH_PREFIX", "METADATA", "THUMBNAIL", "NAME_SWAP", "RCLONE_CONFIG"}
+	options := []string{"LEECH_PREFIX", "METADATA", "THUMBNAIL", "NAME_SWAP", "RCLONE_CONFIG", "WATERMARK_TEXT", "WATERMARK_SIZE", "WATERMARK_COLOR", "WATERMARK_DURATION", "WATERMARK_INTERVAL", "WATERMARK_DELAY"}
 	for _, opt := range options {
 		text, markup := GetOptionMenu(opt, 99887766)
 		if text == "" {

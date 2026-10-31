@@ -310,32 +310,50 @@ func runTaskPipeline(t *task.Task, origMsg, notifyMsg, replyMsg *tg.NewMessage, 
 		}
 	}
 
-	// Apply Prefix & Suffix for Leech tasks
-	cfg := config.Get()
-	if t.Type == task.TypeLeech {
-		prefix := ""
-		suffix := ""
-		if uSettings != nil {
-			prefix = uSettings.Prefix
-			suffix = uSettings.Suffix
-		}
-		if prefix == "" && cfg != nil {
-			prefix = cfg.LeechPrefix
-		}
-		if suffix == "" && cfg != nil {
-			suffix = cfg.LeechSuffix
-		}
-
-		if fi, err := os.Stat(workPath); err == nil && !fi.IsDir() {
-			dir := filepath.Dir(workPath)
-			origName := filepath.Base(workPath)
-			newName := utils.ApplyPrefixSuffix(origName, prefix, suffix)
-			if newName != origName {
-				newPath := filepath.Join(dir, newName)
-				if err := os.Rename(workPath, newPath); err == nil {
-					workPath = newPath
-					t.SetName(newName)
+	// Apply Periodic Video Watermark / Text Overlay if enabled by user
+	if uSettings != nil {
+		wmCfg := media.NewWatermarkConfigFromMap(uSettings.Get)
+		if wmCfg.Enabled && wmCfg.Text != "" {
+			ext := strings.ToLower(filepath.Ext(workPath))
+			isVideo := (ext == ".mp4" || ext == ".mkv" || ext == ".avi" || ext == ".mov" || ext == ".webm" || ext == ".flv" || ext == ".ts" || ext == ".wmv")
+			if isVideo {
+				t.SetStatus(task.StatusProcessing)
+				updateQueueCard(true)
+				wmPath, wmErr := media.ApplyVideoWatermark(t.Ctx, workPath, wmCfg, nil)
+				if wmErr != nil {
+					t.SetError(fmt.Errorf("video watermark processing failed: %w", wmErr))
+					finalize("")
+					return
 				}
+				workPath = wmPath
+			}
+		}
+	}
+
+	// Apply Filename Formatting & Prefix/Suffix for Leech and Mirror tasks
+	cfg := config.Get()
+	prefix := ""
+	suffix := ""
+	if uSettings != nil {
+		prefix = uSettings.Prefix
+		suffix = uSettings.Suffix
+	}
+	if prefix == "" && cfg != nil && t.Type == task.TypeLeech {
+		prefix = cfg.LeechPrefix
+	}
+	if suffix == "" && cfg != nil && t.Type == task.TypeLeech {
+		suffix = cfg.LeechSuffix
+	}
+
+	if fi, err := os.Stat(workPath); err == nil && !fi.IsDir() {
+		dir := filepath.Dir(workPath)
+		origName := filepath.Base(workPath)
+		newName := utils.ApplyPrefixSuffix(origName, prefix, suffix)
+		if newName != origName {
+			newPath := filepath.Join(dir, newName)
+			if err := os.Rename(workPath, newPath); err == nil {
+				workPath = newPath
+				t.SetName(newName)
 			}
 		}
 	}

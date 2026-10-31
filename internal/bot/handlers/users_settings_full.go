@@ -346,6 +346,42 @@ var OptionCatalog = map[string]OptionInfo{
 		Prompt:      "Send one of: <code>public</code>, <code>private</code>, <code>unlisted</code>.\n\n⏳ <b>Time Left:</b> <code>60 sec</code>",
 		ParentPage:  "ytdlp",
 	},
+	"WATERMARK_TEXT": {
+		Title:       "Watermark Overlay Text",
+		Description: "Custom text burned periodically into video frames near bottom or top.",
+		Prompt:      "Send watermark overlay text. Example: <code>Join Our Channel</code>\n\n⏳ <b>Time Left:</b> <code>60 sec</code>",
+		ParentPage:  "watermark",
+	},
+	"WATERMARK_SIZE": {
+		Title:       "Watermark Font Size",
+		Description: "Font size in pixels for the overlay text (e.g. 24, 28, 32).",
+		Prompt:      "Send font size in pixels. Example: <code>24</code>\n\n⏳ <b>Time Left:</b> <code>60 sec</code>",
+		ParentPage:  "watermark",
+	},
+	"WATERMARK_COLOR": {
+		Title:       "Watermark Text Color",
+		Description: "Color of the overlay text (e.g. white, yellow, cyan, red, #00FFFF).",
+		Prompt:      "Send text color name or hex code. Example: <code>white</code> or <code>yellow</code>\n\n⏳ <b>Time Left:</b> <code>60 sec</code>",
+		ParentPage:  "watermark",
+	},
+	"WATERMARK_DURATION": {
+		Title:       "Watermark Display Duration",
+		Description: "How long the watermark text stays visible on screen in seconds.",
+		Prompt:      "Send display duration in seconds. Example: <code>5</code>\n\n⏳ <b>Time Left:</b> <code>60 sec</code>",
+		ParentPage:  "watermark",
+	},
+	"WATERMARK_INTERVAL": {
+		Title:       "Watermark Interval",
+		Description: "Time in seconds between periodic watermark appearances.",
+		Prompt:      "Send interval in seconds. Example: <code>120</code> for every 2 minutes.\n\n⏳ <b>Time Left:</b> <code>60 sec</code>",
+		ParentPage:  "watermark",
+	},
+	"WATERMARK_DELAY": {
+		Title:       "Watermark Initial Delay",
+		Description: "Delay in seconds before the first watermark appearance.",
+		Prompt:      "Send initial delay in seconds. Example: <code>30</code>\n\n⏳ <b>Time Left:</b> <code>60 sec</code>",
+		ParentPage:  "watermark",
+	},
 }
 
 // GetUserSettingsFull builds the WZML-X hierarchical settings view and buttons in Small Caps typography
@@ -396,11 +432,11 @@ func buildUserSettingsFull(userID int64, page string) (string, tg.ReplyMarkup) {
 			),
 			tg.Button.Row(
 				tg.Button.Data("🎬 FF Media Settings", fmt.Sprintf("userset %d ffset", userID)),
-				tg.Button.Data("📑 Clone Settings", fmt.Sprintf("userset %d clone", userID)),
+				tg.Button.Data("🌊 Video Watermark", fmt.Sprintf("userset %d watermark", userID)),
 			),
 			tg.Button.Row(
+				tg.Button.Data("📑 Clone Settings", fmt.Sprintf("userset %d clone", userID)),
 				tg.Button.Data("📺 YT-DLP Settings", fmt.Sprintf("userset %d ytdlp", userID)),
-				tg.Button.Data("⚡️ Misc Settings", fmt.Sprintf("userset %d advanced", userID)),
 			),
 			tg.Button.Row(
 				tg.Button.Data("📦 Export Settings", fmt.Sprintf("userset %d export", userID)),
@@ -644,6 +680,101 @@ func buildUserSettingsFull(userID int64, page string) (string, tg.ReplyMarkup) {
 			),
 			tg.Button.Row(
 				tg.Button.Data("💬 Subtitle Metadata", fmt.Sprintf("userset %d menu SUBTITLE_METADATA", userID)),
+				tg.Button.Data("🌊 Video Watermark", fmt.Sprintf("userset %d watermark", userID)),
+			),
+			tg.Button.Row(
+				tg.Button.Data("🔙 Back", fmt.Sprintf("userset %d back", userID)),
+				tg.Button.Data("❌ Close", fmt.Sprintf("userset %d close", userID)),
+			),
+		)
+		return text, markup
+
+	case "watermark":
+		wmEnabled := st.Get("WATERMARK_ENABLED") == "true"
+		wmText := st.Get("WATERMARK_TEXT")
+		if wmText == "" {
+			wmText = "Join Our Channel"
+		}
+		wmPos := st.Get("WATERMARK_POS")
+		if wmPos == "" {
+			wmPos = "bottom_center"
+		}
+		wmSize := st.Get("WATERMARK_SIZE")
+		if wmSize == "" {
+			wmSize = "24"
+		}
+		wmColor := st.Get("WATERMARK_COLOR")
+		if wmColor == "" {
+			wmColor = "white"
+		}
+		wmDur := st.Get("WATERMARK_DURATION")
+		if wmDur == "" {
+			wmDur = "5"
+		}
+		wmInt := st.Get("WATERMARK_INTERVAL")
+		if wmInt == "" {
+			wmInt = "120"
+		}
+		wmDelay := st.Get("WATERMARK_DELAY")
+		if wmDelay == "" {
+			wmDelay = "30"
+		}
+
+		statusLabel := "❌ Disabled"
+		togAction := "true"
+		togBtn := "🟢 Enable Watermark"
+		if wmEnabled {
+			statusLabel = "✅ Enabled"
+			togAction = "false"
+			togBtn = "🔴 Disable Watermark"
+		}
+
+		posDisplay := "Bottom Center"
+		switch wmPos {
+		case "bottom_left":
+			posDisplay = "Bottom Left"
+		case "bottom_right":
+			posDisplay = "Bottom Right"
+		case "top_center":
+			posDisplay = "Top Center"
+		case "top_left":
+			posDisplay = "Top Left"
+		case "top_right":
+			posDisplay = "Top Right"
+		}
+
+		text := fmt.Sprintf(`⚜ <b><u>Video Watermark & Text Overlay Settings</u></b>
+│
+┠ <b>Watermark Status:</b> <b>%s</b>
+┠ <b>Overlay Text:</b> <code><raw>%s</raw></code>
+┠ <b>Position:</b> <b>%s</b>
+┠ <b>Font Size:</b> <code>%s px</code>
+┠ <b>Text Color:</b> <code>%s</code>
+┠ <b>Display Duration:</b> <code>%s sec</code>
+┠ <b>Display Interval:</b> <code>%s sec</code>
+┖ <b>Initial Delay:</b> <code>%s sec</code>`,
+			statusLabel, html.EscapeString(wmText), posDisplay, wmSize, wmColor, wmDur, wmInt, wmDelay,
+		)
+
+		markup := tg.Button.Keyboard(
+			tg.Button.Row(
+				tg.Button.Data(togBtn, fmt.Sprintf("userset %d tog WATERMARK_ENABLED %s", userID, togAction)),
+			),
+			tg.Button.Row(
+				tg.Button.Data("✍️ Overlay Text", fmt.Sprintf("userset %d menu WATERMARK_TEXT", userID)),
+				tg.Button.Data(fmt.Sprintf("📍 Pos: %s", posDisplay), fmt.Sprintf("userset %d cycle_wm_pos", userID)),
+			),
+			tg.Button.Row(
+				tg.Button.Data("📏 Font Size", fmt.Sprintf("userset %d menu WATERMARK_SIZE", userID)),
+				tg.Button.Data("🎨 Text Color", fmt.Sprintf("userset %d menu WATERMARK_COLOR", userID)),
+			),
+			tg.Button.Row(
+				tg.Button.Data("⏱ Duration", fmt.Sprintf("userset %d menu WATERMARK_DURATION", userID)),
+				tg.Button.Data("⏳ Interval", fmt.Sprintf("userset %d menu WATERMARK_INTERVAL", userID)),
+			),
+			tg.Button.Row(
+				tg.Button.Data("⌛️ Initial Delay", fmt.Sprintf("userset %d menu WATERMARK_DELAY", userID)),
+				tg.Button.Data("🔄 Reset Config", fmt.Sprintf("userset %d reset_watermark", userID)),
 			),
 			tg.Button.Row(
 				tg.Button.Data("🔙 Back", fmt.Sprintf("userset %d back", userID)),
@@ -1189,7 +1320,7 @@ func HandleUsersetCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 		_, _ = cb.Answer("", &tg.CallbackOptions{})
 		return nil
 
-	case "general", "mirror", "leech", "thumb", "ffset", "uphoster", "advanced", "clone", "ytdlp", "mega", "seedr", "rclone", "gdrive", "gofile", "buzzheavier", "pixeldrain", "devuploads", "vikingfile":
+	case "general", "mirror", "leech", "thumb", "ffset", "watermark", "uphoster", "advanced", "clone", "ytdlp", "mega", "seedr", "rclone", "gdrive", "gofile", "buzzheavier", "pixeldrain", "devuploads", "vikingfile":
 		parent := NavManager.GetParent(action)
 		NavManager.Push(targetUID, parent)
 		text, markup := GetUserSettingsFull(targetUID, action)
@@ -1322,7 +1453,7 @@ func HandleUsersetCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 	case "tog":
 		if len(data) >= 5 && db.GlobalStore != nil {
 			key := data[3]
-			val := data[4] == "t"
+			val := data[4] == "t" || data[4] == "true"
 			st, _ := db.GlobalStore.GetUserSettings(targetUID)
 			if st == nil {
 				st = &db.UserSettings{UserID: targetUID, ExtraData: make(map[string]string)}
@@ -1346,12 +1477,60 @@ func HandleUsersetCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 				backTo = "thumb"
 			} else if key == "SEEDR_DELETE_FOLDER" {
 				backTo = "seedr"
+			} else if key == "WATERMARK_ENABLED" {
+				backTo = "watermark"
 			}
 
 			text, markup := GetUserSettingsFull(targetUID, backTo)
 			_, _ = cb.Edit(text, &tg.SendOptions{ParseMode: "html", ReplyMarkup: markup})
 			_, _ = cb.Answer("", &tg.CallbackOptions{})
 		}
+		return nil
+
+	case "cycle_wm_pos":
+		st, _ := db.GlobalStore.GetUserSettings(targetUID)
+		if st == nil {
+			st = &db.UserSettings{UserID: targetUID, ExtraData: make(map[string]string)}
+		}
+		curr := st.Get("WATERMARK_POS")
+		next := "bottom_center"
+		switch curr {
+		case "bottom_center", "":
+			next = "bottom_left"
+		case "bottom_left":
+			next = "bottom_right"
+		case "bottom_right":
+			next = "top_center"
+		case "top_center":
+			next = "top_left"
+		case "top_left":
+			next = "top_right"
+		case "top_right":
+			next = "bottom_center"
+		}
+		st.Set("WATERMARK_POS", next)
+		_ = db.GlobalStore.SaveUserSettings(st)
+		text, markup := GetUserSettingsFull(targetUID, "watermark")
+		_, _ = cb.Edit(text, &tg.SendOptions{ParseMode: "html", ReplyMarkup: markup})
+		_, _ = cb.Answer(typography.ToSmallCaps(fmt.Sprintf("Position set to %s", next)), &tg.CallbackOptions{})
+		return nil
+
+	case "reset_watermark":
+		st, _ := db.GlobalStore.GetUserSettings(targetUID)
+		if st != nil {
+			st.Delete("WATERMARK_ENABLED")
+			st.Delete("WATERMARK_TEXT")
+			st.Delete("WATERMARK_POS")
+			st.Delete("WATERMARK_SIZE")
+			st.Delete("WATERMARK_COLOR")
+			st.Delete("WATERMARK_DURATION")
+			st.Delete("WATERMARK_INTERVAL")
+			st.Delete("WATERMARK_DELAY")
+			_ = db.GlobalStore.SaveUserSettings(st)
+		}
+		text, markup := GetUserSettingsFull(targetUID, "watermark")
+		_, _ = cb.Edit(text, &tg.SendOptions{ParseMode: "html", ReplyMarkup: markup})
+		_, _ = cb.Answer(typography.ToSmallCaps("Watermark reset to defaults!"), &tg.CallbackOptions{})
 		return nil
 
 	case "view":

@@ -57,7 +57,16 @@ func ApplyPrefixSuffix(filename, prefix, suffix string) string {
 			cleanPrefix += " "
 		}
 		trimmedPrefix := strings.TrimSpace(cleanPrefix)
-		if trimmedPrefix != "" && !strings.HasPrefix(base, trimmedPrefix) {
+		coreToken := ExtractCoreToken(trimmedPrefix)
+		hasPrefix := false
+		if trimmedPrefix != "" && strings.HasPrefix(base, trimmedPrefix) {
+			hasPrefix = true
+		} else if coreToken != "" {
+			escaped := regexp.QuoteMeta(coreToken)
+			re := regexp.MustCompile(fmt.Sprintf(`(?i)^\s*(?:[\[\{\(\<\'\"]\s*%s\s*[\]\}\)\>\'\"]|@?%s\b)`, escaped, escaped))
+			hasPrefix = re.MatchString(base)
+		}
+		if !hasPrefix {
 			base = cleanPrefix + base
 		}
 	}

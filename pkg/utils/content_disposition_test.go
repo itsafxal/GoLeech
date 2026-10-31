@@ -84,3 +84,4 @@ func TestSniffFileExtension(t *testing.T) {
 		t.Errorf("expected .pdf from mime, got %s", ext)
 	}
 }
+
