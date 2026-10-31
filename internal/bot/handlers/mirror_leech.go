@@ -185,6 +185,14 @@ func runTaskPipeline(t *task.Task, origMsg, notifyMsg, replyMsg *tg.NewMessage, 
 				ReplyMarkup: finalMarkup,
 			})
 		}
+
+		// Automatic Message Cleanup: Safely remove original user command message to maintain clean chat management
+		if origMsg != nil {
+			go func() {
+				time.Sleep(1 * time.Second)
+				_, _ = origMsg.Delete()
+			}()
+		}
 	}
 
 	defer func() {

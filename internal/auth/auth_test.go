@@ -45,4 +45,11 @@ func TestAuthRoles(t *testing.T) {
 	if GetUserRole(9999, 0) != RoleGuest {
 		t.Errorf("expected RoleGuest for 9999")
 	}
+
+	if !CanAccessBot(1001) || !CanAccessBot(2002) || !CanAccessBot(3003) {
+		t.Errorf("expected 1001, 2002, 3003 to have bot access")
+	}
+	if CanAccessBot(9999) {
+		t.Errorf("did not expect unauthorized user 9999 to have bot access")
+	}
 }

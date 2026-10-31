@@ -466,12 +466,15 @@ func buildUserSettingsFull(userID int64, page string) (string, tg.ReplyMarkup) {
 		thumbBtnStatus := "❌ Not Set"
 		if st.ThumbPath != "" {
 			if strings.HasPrefix(st.ThumbPath, "http://") || strings.HasPrefix(st.ThumbPath, "https://") {
-				thumbStatus = "✅ <i>Configured (URL)</i>"
+				thumbStatus = "✅ <i>Set (URL)</i>"
 				thumbBtnStatus = "✅ Set"
-			} else if _, err := os.Stat(st.ThumbPath); err == nil {
-				thumbStatus = "✅ <i>Configured</i>"
+			} else if _, err := os.Stat(st.ThumbPath); err == nil || len(st.ThumbData) > 0 {
+				thumbStatus = "✅ <i>Set</i>"
 				thumbBtnStatus = "✅ Set"
 			}
+		} else if len(st.ThumbData) > 0 {
+			thumbStatus = "✅ <i>Set</i>"
+			thumbBtnStatus = "✅ Set"
 		}
 
 		eqSplits := st.Get("EQUAL_SPLITS") == "true"
@@ -551,11 +554,14 @@ func buildUserSettingsFull(userID int64, page string) (string, tg.ReplyMarkup) {
 		if st.ThumbPath != "" {
 			if strings.HasPrefix(st.ThumbPath, "http://") || strings.HasPrefix(st.ThumbPath, "https://") {
 				hasThumb = true
-				thumbStatus = "✅ <i>Configured (URL)</i>"
-			} else if _, err := os.Stat(st.ThumbPath); err == nil {
+				thumbStatus = "✅ <i>Set (URL)</i>"
+			} else if _, err := os.Stat(st.ThumbPath); err == nil || len(st.ThumbData) > 0 {
 				hasThumb = true
-				thumbStatus = "✅ <i>Configured</i>"
+				thumbStatus = "✅ <i>Set</i>"
 			}
+		} else if len(st.ThumbData) > 0 {
+			hasThumb = true
+			thumbStatus = "✅ <i>Set</i>"
 		}
 
 		autoThumb := st.Get("AUTO_THUMBNAIL") == "true"
@@ -1164,14 +1170,19 @@ func HandleUsersetCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 
 	switch action {
 	case "close":
+		NavManager.Clear(targetUID)
 		_, _ = cb.Answer("", &tg.CallbackOptions{})
 		_, _ = cb.Delete()
 		return nil
 
 	case "back":
-		backTo := "main"
-		if len(data) >= 4 {
-			backTo = data[3]
+		backTo := NavManager.Pop(targetUID)
+		if backTo == "" {
+			if len(data) >= 4 && data[3] != "" {
+				backTo = data[3]
+			} else {
+				backTo = "main"
+			}
 		}
 		text, markup := GetUserSettingsFull(targetUID, backTo)
 		_, _ = cb.Edit(text, &tg.SendOptions{ParseMode: "html", ReplyMarkup: markup})
@@ -1179,6 +1190,8 @@ func HandleUsersetCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 		return nil
 
 	case "general", "mirror", "leech", "thumb", "ffset", "uphoster", "advanced", "clone", "ytdlp", "mega", "seedr", "rclone", "gdrive", "gofile", "buzzheavier", "pixeldrain", "devuploads", "vikingfile":
+		parent := NavManager.GetParent(action)
+		NavManager.Push(targetUID, parent)
 		text, markup := GetUserSettingsFull(targetUID, action)
 		_, _ = cb.Edit(text, &tg.SendOptions{ParseMode: "html", ReplyMarkup: markup})
 		_, _ = cb.Answer("", &tg.CallbackOptions{})
@@ -1190,6 +1203,10 @@ func HandleUsersetCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 			if len(data) >= 5 && data[4] == "stop" {
 				ClearPendingInput(targetUID)
 				_, _ = cb.Answer(typography.ToSmallCaps("Prompt cancelled."), &tg.CallbackOptions{})
+			}
+			info, _ := OptionCatalog[opt]
+			if info.ParentPage != "" {
+				NavManager.Push(targetUID, info.ParentPage)
 			}
 			text, markup := GetOptionMenu(opt, targetUID)
 			_, _ = cb.Edit(text, &tg.SendOptions{ParseMode: "html", ReplyMarkup: markup})
@@ -1261,6 +1278,8 @@ func HandleUsersetCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 						_ = os.Remove(st.ThumbPath)
 					}
 					st.ThumbPath = ""
+					st.ThumbFileID = ""
+					st.ThumbData = nil
 				} else {
 					st.Delete(opt)
 				}
@@ -1445,7 +1464,13 @@ func ProcessPendingUserInput(m *tg.NewMessage, pending *PendingUserState, botCli
 			tPath := filepath.Join(thumbDir, fmt.Sprintf("%d.jpg", senderID))
 			if _, err := m.Download(&tg.DownloadOptions{FileName: tPath}); err == nil {
 				st.ThumbPath = tPath
-				displayVal = "Photo saved as custom thumbnail"
+				if data, rErr := os.ReadFile(tPath); rErr == nil {
+					st.ThumbData = data
+				}
+				if m.Photo() != nil {
+					st.ThumbFileID = fmt.Sprintf("%d", m.Photo().ID)
+				}
+				displayVal = "Photo saved as custom thumbnail & persisted to database"
 			}
 		} else if strings.HasPrefix(text, "http") {
 			st.ThumbPath = text

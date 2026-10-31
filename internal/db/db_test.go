@@ -11,7 +11,7 @@ func TestDatabaseOperations(t *testing.T) {
 	_ = os.Remove(testDB)
 	defer os.Remove(testDB)
 
-	store, err := InitDB(testDB)
+	store, err := InitDB("", testDB)
 	if err != nil {
 		t.Fatalf("InitDB failed: %v", err)
 	}
@@ -106,4 +106,36 @@ func TestDatabaseOperations(t *testing.T) {
 	if !store.IsRSSItemSeen(feed.ID, "item-1") {
 		t.Errorf("expected item-1 to be marked as seen")
 	}
+
+	// 5. Thumbnail Persistence and Restoration test
+	uid := int64(889900)
+	thumbSampleData := []byte("fake-jpeg-binary-content-12345")
+	tPath := "data/thumbnails/889900.jpg"
+	_ = os.Remove(tPath)
+
+	stThumb := &UserSettings{
+		UserID:      uid,
+		ThumbFileID: "telegram-file-id-xyz",
+		ThumbPath:   tPath,
+		ThumbData:   thumbSampleData,
+	}
+	if err := store.SaveUserSettings(stThumb); err != nil {
+		t.Fatalf("SaveUserSettings with thumbnail failed: %v", err)
+	}
+
+	// Verify restoration from DB
+	loadedSt, err := store.GetUserSettings(uid)
+	if err != nil {
+		t.Fatalf("GetUserSettings failed: %v", err)
+	}
+	if string(loadedSt.ThumbData) != string(thumbSampleData) {
+		t.Errorf("expected thumb data to match, got: %s", string(loadedSt.ThumbData))
+	}
+	if loadedSt.ThumbFileID != "telegram-file-id-xyz" {
+		t.Errorf("expected thumb file ID 'telegram-file-id-xyz', got: %s", loadedSt.ThumbFileID)
+	}
+	if _, err := os.Stat(tPath); err != nil {
+		t.Errorf("expected thumb file to be restored to disk: %v", err)
+	}
+	_ = os.Remove(tPath)
 }

@@ -90,13 +90,12 @@ func main() {
 		log.Println("⚠️ WARNING: BOT_TOKEN is not set in environment or config. Please configure .env")
 	}
 
-	// 2. Initialize Database Layer
-	store, err := db.InitDB(cfg.DatabasePath)
+	// 2. Initialize Database Layer (MongoDB authoritative permanent storage with SQLite fallback)
+	store, err := db.InitDB(cfg.MongoURI, cfg.DatabasePath)
 	if err != nil {
 		log.Fatalf("❌ Failed to initialize database: %v", err)
 	}
 	defer store.Close()
-	log.Printf("📦 Database connected: %s (SQLite WAL Mode)", cfg.DatabasePath)
 
 	// 3. Initialize Task Manager
 	taskMgr := task.InitManager()

@@ -10,3 +10,4 @@ func TestRegisterBotCommandsNilClient(t *testing.T) {
 		t.Errorf("expected nil error for nil client, got: %v", err)
 	}
 }
+

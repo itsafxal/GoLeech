@@ -110,6 +110,36 @@ func ProgressBar(pct float64) string {
 	return sb.String()
 }
 
+// BlockProgressBar generates a high-contrast animated block progress bar like ██████░░░░
+func BlockProgressBar(pct float64) string {
+	if math.IsNaN(pct) || pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	total := 10
+	filled := int(math.Round((pct / 100.0) * float64(total)))
+	if filled > total {
+		filled = total
+	}
+	if filled < 0 {
+		filled = 0
+	}
+	return strings.Repeat("█", filled) + strings.Repeat("░", total-filled)
+}
+
+// SpinnerFrames contains Unicode rotation animation frames
+var SpinnerFrames = []string{"◐", "◓", "◑", "◒"}
+
+// GetSpinnerFrame returns the rotating animation frame for a given tick
+func GetSpinnerFrame(tick int) string {
+	if tick < 0 {
+		tick = -tick
+	}
+	return SpinnerFrames[tick%len(SpinnerFrames)]
+}
+
 // ParseSize converts human-formatted size strings (e.g. 2GB, 2.5gb, 1000mb, 4000000000) to bytes
 func ParseSize(s string) int64 {
 	s = strings.TrimSpace(strings.ToUpper(s))

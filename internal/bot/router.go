@@ -8,10 +8,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/GoLeech/GoLeech/internal/auth"
 	"github.com/GoLeech/GoLeech/internal/bot/handlers"
 	"github.com/GoLeech/GoLeech/internal/bot/ui"
 	"github.com/GoLeech/GoLeech/internal/config"
 	"github.com/GoLeech/GoLeech/internal/db"
+	"github.com/GoLeech/GoLeech/pkg/typography"
 	tg "github.com/amarnathcjd/gogram/telegram"
 )
 
@@ -53,12 +55,35 @@ func RegisterRoutes(botClient *tg.Client) {
 			log.Printf("📩 Received message from %d (chat: %d): %q", m.SenderID(), m.ChatID(), m.Text())
 		}
 
-		// Quick-cancellation handler for /c_<gid>
+		// Strict Authorization Enforcement for all commands (fail-closed)
 		if m.IsCommand() {
 			c := m.GetCommand()
+			cleanCmd := strings.TrimSuffix(c, suffix)
+			if !auth.CanAccessBot(m.SenderID()) {
+				if cleanCmd == "start" {
+					return handlers.HandleStart(m)
+				}
+				unauthNotice := `⛔️ <b><u>Access Denied</u></b>
+│
+┖ You are not authorized to use this bot. Only authorized Admin and Sudo users can access its features. You can create your own repository and configure an independent instance.`
+				repoMarkup := tg.Button.Keyboard(
+					tg.Button.Row(
+						tg.Button.URL("⭐️ GitHub Repository", "https://github.com/itsafxal/GoLeech"),
+					),
+				)
+				_, _ = ui.Reply(m, unauthNotice, &tg.SendOptions{ReplyMarkup: repoMarkup})
+				return nil
+			}
+
+			// Quick-cancellation handler for /c_<gid>
 			if strings.HasPrefix(c, "c_") {
 				return handlers.HandleCancel(m)
 			}
+		}
+
+		// Block unauthorized non-command interaction (settings prompt or thumbnail upload)
+		if !auth.CanAccessBot(m.SenderID()) {
+			return nil
 		}
 
 		// Check for active interactive user settings prompt
@@ -68,7 +93,7 @@ func RegisterRoutes(botClient *tg.Client) {
 			}
 		}
 
-		// Private Chat: Auto-save user photo as custom leech thumbnail
+		// Private Chat: Auto-save user photo as custom leech thumbnail with permanent MongoDB persistence
 		if m.ChatID() == m.SenderID() && m.Photo() != nil && !m.IsCommand() {
 			thumbDir := filepath.Join("data", "thumbnails")
 			_ = os.MkdirAll(thumbDir, 0755)
@@ -76,24 +101,29 @@ func RegisterRoutes(botClient *tg.Client) {
 
 			_, err := m.Download(&tg.DownloadOptions{FileName: targetFile})
 			if err == nil && db.GlobalStore != nil {
+				thumbBytes, _ := os.ReadFile(targetFile)
 				st, _ := db.GlobalStore.GetUserSettings(m.SenderID())
 				if st == nil {
 					st = &db.UserSettings{UserID: m.SenderID()}
 				}
 				st.ThumbPath = targetFile
+				st.ThumbData = thumbBytes
+				if m.Photo() != nil {
+					st.ThumbFileID = fmt.Sprintf("%d", m.Photo().ID)
+				}
 				_ = db.GlobalStore.SaveUserSettings(st)
 
-				successText := `🖼 <b><u>Custom Thumbnail Saved!</u></b>
+				successText := `🖼 <b><u>Custom Thumbnail Saved & Persisted!</u></b>
 │
 ┠ <b>Target:</b> Leech video & document thumbnail
-┠ <b>Status:</b> ✅ Active
+┠ <b>Status:</b> ✅ Active & Synced to Database
 │
-┖ <i>This image will be embedded into all your future leeched media files!</i>`
+┖ <i>This thumbnail is permanently stored and will be embedded into all your future leeched media!</i>`
 				_, _ = ui.Reply(m, successText, &tg.SendOptions{
 					ReplyMarkup: ui.Button.Keyboard(
 						ui.Button.Row(
-							ui.Button.Data("⚙️ View Settings", fmt.Sprintf("usetting:refresh:%d", m.SenderID())),
-							ui.Button.Data("🗑 Delete Thumb", fmt.Sprintf("usetting:del_thumb:%d", m.SenderID())),
+							ui.Button.Data("⚙️ View Settings", fmt.Sprintf("userset %d thumb", m.SenderID())),
+							ui.Button.Data("🗑 Delete Thumb", fmt.Sprintf("userset %d remove THUMBNAIL", m.SenderID())),
 						),
 					),
 				})
@@ -226,9 +256,13 @@ func RegisterRoutes(botClient *tg.Client) {
 	botClient.On(cmd("restart"), handlers.HandleRestart)
 	botClient.On(cmd("r"), handlers.HandleRestart)
 
-	// 8. Interactive Callback Queries
+	// 8. Interactive Callback Queries (Strict Authorization Guard)
 	botClient.On("callback", func(cb *tg.CallbackQuery) error {
 		log.Printf("🔘 Received callback query from %d: %q", cb.SenderID, string(cb.Data))
+		if !auth.CanAccessBot(cb.SenderID) {
+			_, _ = cb.Answer(typography.ToSmallCaps("Access Denied: Only Admin and Sudo users can interact with this bot."), &tg.CallbackOptions{Alert: true})
+			return nil
+		}
 		return handlers.HandleCallback(cb, botClient)
 	})
 

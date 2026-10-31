@@ -71,7 +71,15 @@ func IsAuthorized(userID, chatID int64) bool {
 
 // CanExecute checks if user or chat is allowed to execute tasks
 func CanExecute(userID, chatID int64) bool {
-	return IsAuthorized(userID, chatID)
+	return CanAccessBot(userID)
+}
+
+// CanAccessBot checks if a user is an authorized Admin or Sudo user (strict fail-closed authorization)
+func CanAccessBot(userID int64) bool {
+	if userID == 0 || IsBlacklisted(userID) {
+		return false
+	}
+	return IsSudo(userID)
 }
 
 // GetUserRole returns the highest role of a user

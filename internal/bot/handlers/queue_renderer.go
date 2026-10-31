@@ -12,34 +12,38 @@ import (
 	tg "github.com/amarnathcjd/gogram/telegram"
 )
 
-// RenderQueueTaskMessage formats the live interactive queue card for a task
+// RenderQueueTaskMessage formats the live animated interactive queue card for a task
 func RenderQueueTaskMessage(snap task.TaskSnapshot, cloudURL string) (string, tg.ReplyMarkup) {
+	elapsed := time.Since(snap.StartTime)
+	tick := int(elapsed.Seconds() / 2.0)
+	spinner := utils.GetSpinnerFrame(tick)
+
 	var header string
 	switch snap.Status {
 	case task.StatusQueuedDL:
-		header = "⏳ <b><u>Task Queued for Download</u></b>"
+		header = fmt.Sprintf("%s <b><u>Initializing & Queued for Download...</u></b>", spinner)
 	case task.StatusQueuedUP:
-		header = "⏳ <b><u>Task Queued for Upload</u></b>"
+		header = fmt.Sprintf("%s <b><u>Queued for Upload...</u></b>", spinner)
 	case task.StatusDownloading:
-		header = "📥 <b><u>Downloading Task</u></b>"
+		header = fmt.Sprintf("%s <b><u>Downloading Task...</u></b>", spinner)
 	case task.StatusProcessing:
-		header = "⚙️ <b><u>Processing Media</u></b>"
+		header = fmt.Sprintf("%s <b><u>Processing Media...</u></b>", spinner)
 	case task.StatusExtracting:
-		header = "📂 <b><u>Extracting Archive</u></b>"
+		header = fmt.Sprintf("%s <b><u>Extracting Archive...</u></b>", spinner)
 	case task.StatusArchiving:
-		header = "📦 <b><u>Archiving Content</u></b>"
+		header = fmt.Sprintf("%s <b><u>Archiving Content...</u></b>", spinner)
 	case task.StatusSplitting:
-		header = "✂️ <b><u>Splitting Files</u></b>"
+		header = fmt.Sprintf("%s <b><u>Splitting Files...</u></b>", spinner)
 	case task.StatusUploading:
-		header = "📤 <b><u>Uploading Task</u></b>"
+		header = fmt.Sprintf("%s <b><u>Uploading to Telegram...</u></b>", spinner)
 	case task.StatusCompleted:
-		header = "✅ <b><u>Task Completed!</u></b>"
+		header = "✓ <b><u>Completed Successfully</u></b>"
 	case task.StatusFailed:
-		header = "❌ <b><u>Task Failed</u></b>"
+		header = "✗ <b><u>Task Failed</u></b>"
 	case task.StatusCancelled:
 		header = "🛑 <b><u>Task Cancelled</u></b>"
 	default:
-		header = "⚡️ <b><u>Task In Progress</u></b>"
+		header = fmt.Sprintf("%s <b><u>Transmitting...</u></b>", spinner)
 	}
 
 	var sb strings.Builder
@@ -48,8 +52,6 @@ func RenderQueueTaskMessage(snap task.TaskSnapshot, cloudURL string) (string, tg
 	sb.WriteString(fmt.Sprintf("┠ <b>GID:</b> <code>%s</code>\n", snap.GID))
 	sb.WriteString(fmt.Sprintf("┠ <b>Type:</b> <i>%s</i>\n", snap.Type))
 	sb.WriteString(fmt.Sprintf("┠ <b>Engine:</b> <i>%s</i>\n", snap.Engine))
-
-	elapsed := time.Since(snap.StartTime)
 
 	var markup tg.ReplyMarkup
 
@@ -84,7 +86,7 @@ func RenderQueueTaskMessage(snap task.TaskSnapshot, cloudURL string) (string, tg
 	default: // Downloading, Processing, Uploading, etc.
 		sb.WriteString(fmt.Sprintf("┠ <b>Status:</b> <b>%s</b>\n", snap.Status))
 		pct := snap.ProgressPct
-		sb.WriteString(fmt.Sprintf("┠ %s <i>%.1f%%</i>\n", utils.ProgressBar(pct), pct))
+		sb.WriteString(fmt.Sprintf("┠ <code>%s</code> <i>%.1f%%</i>\n", utils.BlockProgressBar(pct), pct))
 		sb.WriteString(fmt.Sprintf("┠ <b>Processed:</b> <i>%s of %s</i>\n", utils.FormatBytes(snap.ProcessedBytes), utils.FormatBytes(snap.TotalSize)))
 		sb.WriteString(fmt.Sprintf("┠ <b>Speed:</b> <i>%s</i>\n", utils.FormatSpeed(snap.Speed)))
 		sb.WriteString(fmt.Sprintf("┠ <b>ETA:</b> <i>%s</i>\n", utils.FormatSeconds(snap.ETA)))

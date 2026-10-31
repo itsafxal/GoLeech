@@ -17,6 +17,7 @@ type Config struct {
 	OwnerID              int64   `json:"owner_id"`
 	UserSessionString    string  `json:"user_session_string"`
 	DatabasePath         string  `json:"database_path"`
+	MongoURI             string  `json:"mongo_uri"`
 	DownloadDir          string  `json:"download_dir"`
 	SudoUsers            []int64 `json:"sudo_users"`
 	AuthorizedChats      []int64 `json:"authorized_chats"`
@@ -97,6 +98,13 @@ func LoadConfig() *Config {
 	}
 	if val := os.Getenv("DATABASE_PATH"); val != "" {
 		cfg.DatabasePath = val
+	}
+	if val := os.Getenv("DATABASE_URL"); val != "" {
+		cfg.MongoURI = val
+	} else if val := os.Getenv("MONGO_URI"); val != "" {
+		cfg.MongoURI = val
+	} else if val := os.Getenv("MONGODB_URI"); val != "" {
+		cfg.MongoURI = val
 	}
 	if val := os.Getenv("DOWNLOAD_DIR"); val != "" {
 		cfg.DownloadDir = val

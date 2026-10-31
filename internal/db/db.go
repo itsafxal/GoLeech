@@ -4,23 +4,30 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
+	"go.mongodb.org/mongo-driver/mongo"
 	_ "modernc.org/sqlite"
 )
 
 type UserSettings struct {
-	UserID     int64             `json:"user_id"`
-	DumpChat   int64             `json:"dump_chat"`
-	Prefix     string            `json:"prefix"`
-	Suffix     string            `json:"suffix"`
-	Caption    string            `json:"caption"`
-	SplitSize  int64             `json:"split_size"`
-	AsDoc      bool              `json:"as_doc"`
-	ThumbPath  string            `json:"thumb_path"`
-	UploadDest string            `json:"upload_dest"`
-	ExtraData  map[string]string `json:"extra_data"`
+	UserID      int64             `json:"user_id" bson:"user_id"`
+	DumpChat    int64             `json:"dump_chat" bson:"dump_chat"`
+	Prefix      string            `json:"prefix" bson:"prefix"`
+	Suffix      string            `json:"suffix" bson:"suffix"`
+	Caption     string            `json:"caption" bson:"caption"`
+	SplitSize   int64             `json:"split_size" bson:"split_size"`
+	AsDoc       bool              `json:"as_doc" bson:"as_doc"`
+	ThumbPath   string            `json:"thumb_path" bson:"thumb_path"`
+	ThumbFileID string            `json:"thumb_file_id" bson:"thumb_file_id"`
+	ThumbData   []byte            `json:"thumb_data" bson:"thumb_data"`
+	UploadDest  string            `json:"upload_dest" bson:"upload_dest"`
+	ExtraData   map[string]string `json:"extra_data" bson:"extra_data"`
+	UpdatedAt   time.Time         `json:"updated_at" bson:"updated_at"`
 }
 
 func (u *UserSettings) Get(key string) string {
@@ -44,51 +51,70 @@ func (u *UserSettings) Delete(key string) {
 }
 
 type UserRecord struct {
-	ID            int64     `json:"id"`
-	Username      string    `json:"username"`
-	IsSudo        bool      `json:"is_sudo"`
-	IsAuth        bool      `json:"is_auth"`
-	IsBlacklisted bool      `json:"is_blacklisted"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID            int64     `json:"id" bson:"id"`
+	Username      string    `json:"username" bson:"username"`
+	IsSudo        bool      `json:"is_sudo" bson:"is_sudo"`
+	IsAuth        bool      `json:"is_auth" bson:"is_auth"`
+	IsBlacklisted bool      `json:"is_blacklisted" bson:"is_blacklisted"`
+	CreatedAt     time.Time `json:"created_at" bson:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at" bson:"updated_at"`
 }
 
 type TaskRecord struct {
-	GID       string    `json:"gid"`
-	UserID    int64     `json:"user_id"`
-	Name      string    `json:"name"`
-	Type      string    `json:"type"`
-	Engine    string    `json:"engine"`
-	Status    string    `json:"status"`
-	Size      int64     `json:"size"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	GID       string    `json:"gid" bson:"gid"`
+	UserID    int64     `json:"user_id" bson:"user_id"`
+	Name      string    `json:"name" bson:"name"`
+	Type      string    `json:"type" bson:"type"`
+	Engine    string    `json:"engine" bson:"engine"`
+	Status    string    `json:"status" bson:"status"`
+	Size      int64     `json:"size" bson:"size"`
+	CreatedAt time.Time `json:"created_at" bson:"created_at"`
+	UpdatedAt time.Time `json:"updated_at" bson:"updated_at"`
 }
 
 type RSSFeedRecord struct {
-	ID            int64     `json:"id"`
-	Title         string    `json:"title"`
-	URL           string    `json:"url"`
-	FilterInclude string    `json:"filter_include"`
-	FilterExclude string    `json:"filter_exclude"`
-	Command       string    `json:"command"`
-	ChatID        int64     `json:"chat_id"`
-	LastChecked   time.Time `json:"last_checked"`
+	ID            int64     `json:"id" bson:"id"`
+	Title         string    `json:"title" bson:"title"`
+	URL           string    `json:"url" bson:"url"`
+	FilterInclude string    `json:"filter_include" bson:"filter_include"`
+	FilterExclude string    `json:"filter_exclude" bson:"filter_exclude"`
+	Command       string    `json:"command" bson:"command"`
+	ChatID        int64     `json:"chat_id" bson:"chat_id"`
+	LastChecked   time.Time `json:"last_checked" bson:"last_checked"`
 }
 
 type Store struct {
-	db *sql.DB
-	mu sync.RWMutex
+	db          *sql.DB
+	mongoClient *mongo.Client
+	mongoDB     *mongo.Database
+	isMongo     bool
+	mu          sync.RWMutex
 }
 
 var GlobalStore *Store
 
-func InitDB(dbPath string) (*Store, error) {
+// InitDB initializes the database layer. If mongoURI is provided, MongoDB is used as the authoritative persistent storage.
+// If mongoURI is empty or connection fails, it falls back seamlessly to SQLite.
+func InitDB(mongoURI, dbPath string) (*Store, error) {
+	if mongoURI != "" && (strings.HasPrefix(mongoURI, "mongodb://") || strings.HasPrefix(mongoURI, "mongodb+srv://")) {
+		store, err := initMongoDB(mongoURI)
+		if err == nil {
+			GlobalStore = store
+			return store, nil
+		}
+		log.Printf("⚠️ MongoDB connection failed: %v. Falling back to SQLite (%s)...", err, dbPath)
+	}
+
+	return initSQLite(dbPath)
+}
+
+func initSQLite(dbPath string) (*Store, error) {
 	conn, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
 	}
 
-	conn.SetMaxOpenConns(1) // SQLite works best with single writer or WAL mode
+	conn.SetMaxOpenConns(1)
 
 	schema := `
 	PRAGMA journal_mode = WAL;
@@ -111,7 +137,10 @@ func InitDB(dbPath string) (*Store, error) {
 		split_size INTEGER DEFAULT 0,
 		as_doc INTEGER DEFAULT 1,
 		thumb_path TEXT DEFAULT '',
-		upload_dest TEXT DEFAULT ''
+		thumb_file_id TEXT DEFAULT '',
+		thumb_data BLOB,
+		upload_dest TEXT DEFAULT '',
+		extra_data TEXT DEFAULT '{}'
 	);
 
 	CREATE TABLE IF NOT EXISTS tasks (
@@ -159,11 +188,13 @@ func InitDB(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("failed to execute migrations: %w", err)
 	}
 
-	// Safe column migration for existing databases
+	// Safe column migrations for existing databases
 	_, _ = conn.Exec("ALTER TABLE users ADD COLUMN is_blacklisted INTEGER DEFAULT 0;")
 	_, _ = conn.Exec("ALTER TABLE user_settings ADD COLUMN extra_data TEXT DEFAULT '{}';")
+	_, _ = conn.Exec("ALTER TABLE user_settings ADD COLUMN thumb_file_id TEXT DEFAULT '';")
+	_, _ = conn.Exec("ALTER TABLE user_settings ADD COLUMN thumb_data BLOB;")
 
-	store := &Store{db: conn}
+	store := &Store{db: conn, isMongo: false}
 	GlobalStore = store
 	return store, nil
 }
@@ -171,6 +202,9 @@ func InitDB(dbPath string) (*Store, error) {
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.isMongo {
+		return s.mongoClose()
+	}
 	if s.db != nil {
 		return s.db.Close()
 	}
@@ -178,6 +212,9 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) IsSudo(userID int64) bool {
+	if s.isMongo {
+		return s.mongoIsSudo(userID)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var sudo int
@@ -186,6 +223,9 @@ func (s *Store) IsSudo(userID int64) bool {
 }
 
 func (s *Store) IsAuthorized(userID, chatID int64) bool {
+	if s.isMongo {
+		return s.mongoIsAuthorized(userID, chatID)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var auth int
@@ -194,6 +234,9 @@ func (s *Store) IsAuthorized(userID, chatID int64) bool {
 }
 
 func (s *Store) AddSudo(userID int64, username string) error {
+	if s.isMongo {
+		return s.mongoAddSudo(userID, username)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(`
@@ -204,6 +247,9 @@ func (s *Store) AddSudo(userID int64, username string) error {
 }
 
 func (s *Store) RemoveSudo(userID int64) error {
+	if s.isMongo {
+		return s.mongoRemoveSudo(userID)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec("UPDATE users SET is_sudo = 0 WHERE id = ?", userID)
@@ -211,6 +257,9 @@ func (s *Store) RemoveSudo(userID int64) error {
 }
 
 func (s *Store) AuthorizeChat(chatID int64) error {
+	if s.isMongo {
+		return s.mongoAuthorizeChat(chatID)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(`
@@ -221,6 +270,9 @@ func (s *Store) AuthorizeChat(chatID int64) error {
 }
 
 func (s *Store) UnauthorizeChat(chatID int64) error {
+	if s.isMongo {
+		return s.mongoUnauthorizeChat(chatID)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec("UPDATE users SET is_auth = 0 WHERE id = ?", chatID)
@@ -228,6 +280,9 @@ func (s *Store) UnauthorizeChat(chatID int64) error {
 }
 
 func (s *Store) IsBlacklisted(id int64) bool {
+	if s.isMongo {
+		return s.mongoIsBlacklisted(id)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var bl int
@@ -236,6 +291,9 @@ func (s *Store) IsBlacklisted(id int64) bool {
 }
 
 func (s *Store) Blacklist(id int64, username string) error {
+	if s.isMongo {
+		return s.mongoBlacklist(id, username)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(`
@@ -246,6 +304,9 @@ func (s *Store) Blacklist(id int64, username string) error {
 }
 
 func (s *Store) RemoveBlacklist(id int64) error {
+	if s.isMongo {
+		return s.mongoRemoveBlacklist(id)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec("UPDATE users SET is_blacklisted = 0 WHERE id = ?", id)
@@ -253,6 +314,9 @@ func (s *Store) RemoveBlacklist(id int64) error {
 }
 
 func (s *Store) GetUserStats() (totalUsers, totalSudos, totalAuth, totalBlacklisted int64, err error) {
+	if s.isMongo {
+		return s.mongoGetUserStats()
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	_ = s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&totalUsers)
@@ -263,6 +327,9 @@ func (s *Store) GetUserStats() (totalUsers, totalSudos, totalAuth, totalBlacklis
 }
 
 func (s *Store) GetAllUsers() ([]*UserRecord, error) {
+	if s.isMongo {
+		return s.mongoGetAllUsers()
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rows, err := s.db.Query("SELECT id, username, is_sudo, is_auth, is_blacklisted, created_at FROM users ORDER BY created_at DESC")
@@ -287,6 +354,9 @@ func (s *Store) GetAllUsers() ([]*UserRecord, error) {
 }
 
 func (s *Store) SetBotSetting(key, val string) error {
+	if s.isMongo {
+		return s.mongoSetBotSetting(key, val)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(`
@@ -297,6 +367,9 @@ func (s *Store) SetBotSetting(key, val string) error {
 }
 
 func (s *Store) GetBotSetting(key string) (string, error) {
+	if s.isMongo {
+		return s.mongoGetBotSetting(key)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var val string
@@ -305,6 +378,9 @@ func (s *Store) GetBotSetting(key string) (string, error) {
 }
 
 func (s *Store) GetUserSettings(userID int64) (*UserSettings, error) {
+	if s.isMongo {
+		return s.mongoGetUserSettings(userID)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	settings := &UserSettings{
@@ -314,8 +390,9 @@ func (s *Store) GetUserSettings(userID int64) (*UserSettings, error) {
 	}
 	var asDocInt int
 	var extraJSON string
+	var thumbBlob []byte
 	err := s.db.QueryRow(`
-		SELECT dump_chat, prefix, suffix, caption, split_size, as_doc, thumb_path, upload_dest, COALESCE(extra_data, '{}')
+		SELECT dump_chat, prefix, suffix, caption, split_size, as_doc, thumb_path, COALESCE(thumb_file_id, ''), thumb_data, upload_dest, COALESCE(extra_data, '{}')
 		FROM user_settings WHERE user_id = ?
 	`, userID).Scan(
 		&settings.DumpChat,
@@ -325,6 +402,8 @@ func (s *Store) GetUserSettings(userID int64) (*UserSettings, error) {
 		&settings.SplitSize,
 		&asDocInt,
 		&settings.ThumbPath,
+		&settings.ThumbFileID,
+		&thumbBlob,
 		&settings.UploadDest,
 		&extraJSON,
 	)
@@ -334,6 +413,7 @@ func (s *Store) GetUserSettings(userID int64) (*UserSettings, error) {
 	if err != nil {
 		return nil, err
 	}
+	settings.ThumbData = thumbBlob
 	if extraJSON != "" {
 		_ = json.Unmarshal([]byte(extraJSON), &settings.ExtraData)
 	}
@@ -344,17 +424,21 @@ func (s *Store) GetUserSettings(userID int64) (*UserSettings, error) {
 	if asDocInt == 1 {
 		settings.AsDoc = true
 	} else {
-		// If asDocInt is 0, check if explicitly opted out of Document
 		if settings.Get("AS_DOCUMENT") == "false" {
 			settings.AsDoc = false
 		} else {
 			settings.AsDoc = true
 		}
 	}
+
+	restoreThumbnailIfNeeded(settings)
 	return settings, nil
 }
 
 func (s *Store) SaveUserSettings(st *UserSettings) error {
+	if s.isMongo {
+		return s.mongoSaveUserSettings(st)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	asDocInt := 0
@@ -369,10 +453,18 @@ func (s *Store) SaveUserSettings(st *UserSettings) error {
 	} else {
 		st.ExtraData["AS_DOCUMENT"] = "true"
 	}
+
+	// Read file bytes into ThumbData if missing
+	if st.ThumbPath != "" && len(st.ThumbData) == 0 {
+		if data, err := os.ReadFile(st.ThumbPath); err == nil && len(data) > 0 {
+			st.ThumbData = data
+		}
+	}
+
 	extraJSON, _ := json.Marshal(st.ExtraData)
 	_, err := s.db.Exec(`
-		INSERT INTO user_settings (user_id, dump_chat, prefix, suffix, caption, split_size, as_doc, thumb_path, upload_dest, extra_data)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO user_settings (user_id, dump_chat, prefix, suffix, caption, split_size, as_doc, thumb_path, thumb_file_id, thumb_data, upload_dest, extra_data)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_id) DO UPDATE SET
 			dump_chat = excluded.dump_chat,
 			prefix = excluded.prefix,
@@ -381,13 +473,18 @@ func (s *Store) SaveUserSettings(st *UserSettings) error {
 			split_size = excluded.split_size,
 			as_doc = excluded.as_doc,
 			thumb_path = excluded.thumb_path,
+			thumb_file_id = excluded.thumb_file_id,
+			thumb_data = excluded.thumb_data,
 			upload_dest = excluded.upload_dest,
 			extra_data = excluded.extra_data
-	`, st.UserID, st.DumpChat, st.Prefix, st.Suffix, st.Caption, st.SplitSize, asDocInt, st.ThumbPath, st.UploadDest, string(extraJSON))
+	`, st.UserID, st.DumpChat, st.Prefix, st.Suffix, st.Caption, st.SplitSize, asDocInt, st.ThumbPath, st.ThumbFileID, st.ThumbData, st.UploadDest, string(extraJSON))
 	return err
 }
 
 func (s *Store) GetImages() []string {
+	if s.isMongo {
+		return s.mongoGetImages()
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rows, err := s.db.Query("SELECT url FROM bot_images ORDER BY id ASC")
@@ -406,6 +503,9 @@ func (s *Store) GetImages() []string {
 }
 
 func (s *Store) AddImage(url string) error {
+	if s.isMongo {
+		return s.mongoAddImage(url)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec("INSERT INTO bot_images (url) VALUES (?)", url)
@@ -413,6 +513,9 @@ func (s *Store) AddImage(url string) error {
 }
 
 func (s *Store) RemoveImage(index int) error {
+	if s.isMongo {
+		return s.mongoRemoveImage(index)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	images := []int64{}
@@ -435,6 +538,9 @@ func (s *Store) RemoveImage(index int) error {
 }
 
 func (s *Store) ClearImages() error {
+	if s.isMongo {
+		return s.mongoClearImages()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec("DELETE FROM bot_images")
@@ -442,6 +548,9 @@ func (s *Store) ClearImages() error {
 }
 
 func (s *Store) SaveTask(t *TaskRecord) error {
+	if s.isMongo {
+		return s.mongoSaveTask(t)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(`
@@ -456,6 +565,9 @@ func (s *Store) SaveTask(t *TaskRecord) error {
 }
 
 func (s *Store) GetRecentTasks(limit int) ([]*TaskRecord, error) {
+	if s.isMongo {
+		return s.mongoGetRecentTasks(limit)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rows, err := s.db.Query(`
@@ -479,6 +591,9 @@ func (s *Store) GetRecentTasks(limit int) ([]*TaskRecord, error) {
 }
 
 func (s *Store) AddRSSFeed(feed *RSSFeedRecord) error {
+	if s.isMongo {
+		return s.mongoAddRSSFeed(feed)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	res, err := s.db.Exec(`
@@ -496,6 +611,9 @@ func (s *Store) AddRSSFeed(feed *RSSFeedRecord) error {
 }
 
 func (s *Store) GetRSSFeeds() ([]*RSSFeedRecord, error) {
+	if s.isMongo {
+		return s.mongoGetRSSFeeds()
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rows, err := s.db.Query(`
@@ -519,6 +637,9 @@ func (s *Store) GetRSSFeeds() ([]*RSSFeedRecord, error) {
 }
 
 func (s *Store) DeleteRSSFeed(id int64) error {
+	if s.isMongo {
+		return s.mongoDeleteRSSFeed(id)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec("DELETE FROM rss_feeds WHERE id = ?", id)
@@ -526,6 +647,9 @@ func (s *Store) DeleteRSSFeed(id int64) error {
 }
 
 func (s *Store) IsRSSItemSeen(feedID int64, itemID string) bool {
+	if s.isMongo {
+		return s.mongoIsRSSItemSeen(feedID, itemID)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var count int
@@ -534,6 +658,9 @@ func (s *Store) IsRSSItemSeen(feedID int64, itemID string) bool {
 }
 
 func (s *Store) MarkRSSItemSeen(feedID int64, itemID string) error {
+	if s.isMongo {
+		return s.mongoMarkRSSItemSeen(feedID, itemID)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec("INSERT OR IGNORE INTO rss_seen (feed_id, item_id) VALUES (?, ?)", feedID, itemID)

@@ -6,6 +6,7 @@ import (
 
 	"github.com/GoLeech/GoLeech/internal/task"
 	"github.com/GoLeech/GoLeech/pkg/typography"
+	"github.com/GoLeech/GoLeech/pkg/utils"
 )
 
 func TestGetHelpContent(t *testing.T) {
@@ -166,6 +167,65 @@ func TestThumbnailStatusIndicator(t *testing.T) {
 	textThumb, _ := GetUserSettingsFull(11223344, "thumb")
 	if !strings.Contains(textThumb, expected) {
 		t.Errorf("expected '%s' indicator in thumb settings: %s", expected, textThumb)
+	}
+}
+
+func TestNavStack(t *testing.T) {
+	uid := int64(999888)
+	NavManager.Clear(uid)
+
+	// Scenario A: Leech Settings -> Thumbnail Settings -> Back returns to Leech Settings
+	NavManager.Push(uid, "leech")
+	NavManager.Push(uid, "thumb")
+
+	last := NavManager.Pop(uid)
+	if last != "thumb" {
+		t.Errorf("expected popped page 'thumb', got: %s", last)
+	}
+	prev := NavManager.Pop(uid)
+	if prev != "leech" {
+		t.Errorf("expected previous page 'leech', got: %s", prev)
+	}
+
+	// Scenario B: Mirror Settings -> Metadata Settings -> Back returns to Mirror Settings
+	NavManager.Push(uid, "mirror")
+	NavManager.Push(uid, "rclone")
+	prevMirror := NavManager.Pop(uid)
+	if prevMirror != "rclone" {
+		t.Errorf("expected 'rclone', got: %s", prevMirror)
+	}
+	backMirror := NavManager.Pop(uid)
+	if backMirror != "mirror" {
+		t.Errorf("expected 'mirror', got: %s", backMirror)
+	}
+
+	// Hierarchical fallback
+	if NavManager.GetParent("thumb") != "leech" {
+		t.Errorf("expected parent of 'thumb' to be 'leech'")
+	}
+	if NavManager.GetParent("rclone") != "mirror" {
+		t.Errorf("expected parent of 'rclone' to be 'mirror'")
+	}
+}
+
+func TestBlockProgressBarAndSpinner(t *testing.T) {
+	bar := utils.BlockProgressBar(60.0)
+	if bar != "██████░░░░" {
+		t.Errorf("expected '██████░░░░', got '%s'", bar)
+	}
+
+	bar100 := utils.BlockProgressBar(100.0)
+	if bar100 != "██████████" {
+		t.Errorf("expected '██████████', got '%s'", bar100)
+	}
+
+	f0 := utils.GetSpinnerFrame(0)
+	f1 := utils.GetSpinnerFrame(1)
+	f2 := utils.GetSpinnerFrame(2)
+	f3 := utils.GetSpinnerFrame(3)
+
+	if f0 != "◐" || f1 != "◓" || f2 != "◑" || f3 != "◒" {
+		t.Errorf("unexpected spinner frames: %s, %s, %s, %s", f0, f1, f2, f3)
 	}
 }
 

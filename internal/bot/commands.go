@@ -57,3 +57,4 @@ func RegisterBotCommands(client *tg.Client) error {
 	log.Printf("🤖 Registered %d bot commands with Telegram native command menu", len(tgCommands))
 	return nil
 }
+

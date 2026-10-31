@@ -9,42 +9,50 @@ import (
 	tg "github.com/amarnathcjd/gogram/telegram"
 )
 
-// HandleStart handles the /start command
+// HandleStart handles the /start command with strict role-based presentation
 func HandleStart(m *tg.NewMessage) error {
 	senderID := m.SenderID()
-	chatID := m.ChatID()
-	role := auth.GetUserRole(senderID, chatID)
 
-	text := fmt.Sprintf(`⌬ <b><u>GoLeech — High-Performance Cloud Transfer</u></b>
-│
-┠ <b>Tagline:</b> <i>Mirror Anything. Leech Anywhere. Powered by Go.</i>
-┠ <b>User ID:</b> <code>%d</code>
-┠ <b>Access Role:</b> <b>%s</b>
-┠ <b>Core Engine:</b> <code>Gogram MTProto + Pure Go Multi-Engine</code>
-│
-┖ <i>Choose a category below to explore commands, features, and settings:</i>`, senderID, role)
-
-	markup := tg.Button.Keyboard(
+	repoMarkup := tg.Button.Keyboard(
 		tg.Button.Row(
-			tg.Button.Data("📥 Downloads", "help:dl"),
-			tg.Button.Data("📤 Uploads", "help:up"),
-		),
-		tg.Button.Row(
-			tg.Button.Data("⚡️ Flags Reference", "help:flags"),
-			tg.Button.Data("⚙️ User Settings", "help:settings"),
-		),
-		tg.Button.Row(
-			tg.Button.Data("🛡 Admin & Sudo", "help:admin"),
-			tg.Button.Data("📊 System Stats", "stats:view"),
-		),
-		tg.Button.Row(
-			tg.Button.URL("⭐️ GitHub Repository", "https://github.com/GoLeech/GoLeech"),
+			tg.Button.URL("⭐️ GitHub Repository", "https://github.com/itsafxal/GoLeech"),
 		),
 	)
 
+	// Unauthorized Users: Clean rejection with only repository button
+	if !auth.CanAccessBot(senderID) {
+		unauthText := `⛔️ <b><u>Access Denied</u></b>
+│
+┖ You are not authorized to use this bot. Only authorized Admin and Sudo users can access its features. You can create your own repository and configure an independent instance.`
+
+		_, err := m.Reply(typography.ToSmallCapsHTML(unauthText), &tg.SendOptions{
+			ParseMode:   "html",
+			ReplyMarkup: typography.FormatMarkup(repoMarkup),
+		})
+		if err != nil {
+			log.Printf("⚠️ Error replying unauthorized /start for %d: %v", senderID, err)
+		}
+		return err
+	}
+
+	// Authorized Admin and Sudo Users: Clean role-based interface with repository button
+	roleName := "Sudo User"
+	if auth.IsOwner(senderID) {
+		roleName = "Admin / Owner"
+	}
+
+	text := fmt.Sprintf(`⌬ <b><u>GoLeech — High-Performance Cloud Transfer</u></b>
+│
+┠ <b>Tagline:</b> <i>Mirror Anything. Leech Anywhere. Powered by Go & MTProto.</i>
+┠ <b>User ID:</b> <code>%d</code>
+┠ <b>Access:</b> <b>Authorized (%s)</b>
+┠ <b>Status:</b> <b>Active & Ready</b>
+│
+┖ <i>Welcome! Send a link or file with /leech or /mirror to begin transmissions.</i>`, senderID, roleName)
+
 	_, err := m.Reply(typography.ToSmallCapsHTML(text), &tg.SendOptions{
 		ParseMode:   "html",
-		ReplyMarkup: typography.FormatMarkup(markup),
+		ReplyMarkup: typography.FormatMarkup(repoMarkup),
 	})
 	if err != nil {
 		log.Printf("⚠️ Error replying to /start for %d: %v", senderID, err)
