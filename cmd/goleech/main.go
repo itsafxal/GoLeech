@@ -57,6 +57,17 @@ func initBotClient(cfg *config.Config) (*tg.Client, error) {
 			continue
 		}
 
+		// Pre-cache bot info to avoid RPC deadlocks during update handling
+		if me, err := client.GetMe(); err == nil && me != nil {
+			log.Printf("🤖 Bot authenticated as @%s (ID: %d - %s)", me.Username, me.ID, me.FirstName)
+		}
+
+		// Synchronize initial update stream state
+		if state, err := client.UpdatesGetState(); err == nil && state != nil {
+			log.Printf("🔄 Update stream active (PTS: %d, Date: %d)", state.Pts, state.Date)
+			go client.FetchDifferenceOnStartup(state.Pts)
+		}
+
 		return client, nil
 	}
 
@@ -94,7 +105,6 @@ func main() {
 
 	// 4. Initialize MTProto Bot Client
 	var botClient *tg.Client
-	var userClient *tg.Client
 
 	if cfg.BotToken != "" && cfg.TelegramAPI != 0 && cfg.TelegramHash != "" {
 		var bErr error
@@ -104,34 +114,47 @@ func main() {
 		}
 		log.Println("🤖 Gogram MTProto Bot client connected successfully")
 
-		// Optional: Initialize Telegram User session if configured
-		if cfg.UserSessionString != "" {
-			var uErr error
-			userClient, uErr = tg.NewClient(tg.ClientConfig{
-				AppID:         cfg.TelegramAPI,
-				AppHash:       cfg.TelegramHash,
-				StringSession: cfg.UserSessionString,
-			})
-			if uErr != nil {
-				log.Printf("⚠️ Failed to initialize Gogram User Client: %v", uErr)
-			} else {
-				if _, err := userClient.Conn(); err == nil {
-					log.Println("👤 Telegram 4GB Premium User Client connected")
-				} else {
-					log.Printf("⚠️ User Client connection error: %v (verify USER_SESSION_STRING with 'go run ./cmd/login')", err)
-					userClient = nil
-				}
-			}
-		}
-
 		// 5. Initialize Plugin Registry
 		pluginReg := plugin.InitRegistry(botClient)
 		_ = pluginReg.RegisterPlugin(context.Background(), &plugin.MediaInfoPlugin{})
 		log.Println("🔌 Plugin Registry initialized with built-in extensions")
 
-		// 6. Register Routes & Handlers
-		bot.RegisterRoutes(botClient, userClient)
+		// 6. Register Routes & Handlers immediately
+		bot.RegisterRoutes(botClient)
 		log.Println("📡 Telegram command handlers & callback router registered")
+
+		// Optional: Asynchronously initialize Telegram User session if configured
+		if cfg.UserSessionString != "" {
+			go func() {
+				log.Println("👤 Connecting Telegram User Client in background...")
+				uClient, uErr := tg.NewClient(tg.ClientConfig{
+					AppID:         cfg.TelegramAPI,
+					AppHash:       cfg.TelegramHash,
+					StringSession: cfg.UserSessionString,
+				})
+				if uErr != nil {
+					log.Printf("⚠️ User Client initialization skipped: %v", uErr)
+					return
+				}
+
+				connCh := make(chan error, 1)
+				go func() {
+					connCh <- uClient.Connect()
+				}()
+
+				select {
+				case err := <-connCh:
+					if err == nil {
+						bot.SetUserClient(uClient)
+						log.Println("👤 Telegram 4GB Premium User Client connected successfully")
+					} else {
+						log.Printf("⚠️ User Client connection error: %v (generate session with 'go run ./cmd/login')", err)
+					}
+				case <-time.After(6 * time.Second):
+					log.Println("⚠️ User Client connection timed out (6s). Running in standard 2GB Bot mode.")
+				}
+			}()
+		}
 	} else {
 		log.Println("⚠️ Telegram credentials not fully provided. Bot will run in Web/API mode.")
 	}
@@ -168,8 +191,8 @@ func main() {
 	if botClient != nil {
 		_ = botClient.Stop()
 	}
-	if userClient != nil {
-		_ = userClient.Stop()
+	if uClient := bot.GetUserClient(); uClient != nil {
+		_ = uClient.Stop()
 	}
 
 	// Cancel all remaining active tasks and cleanup

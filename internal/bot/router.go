@@ -1,15 +1,36 @@
 package bot
 
 import (
+	"log"
 	"strings"
+	"sync"
 
 	"github.com/GoLeech/GoLeech/internal/bot/handlers"
 	"github.com/GoLeech/GoLeech/internal/config"
 	tg "github.com/amarnathcjd/gogram/telegram"
 )
 
+var (
+	activeUserClient *tg.Client
+	userClientMu     sync.RWMutex
+)
+
+// SetUserClient safely sets or updates the optional user client (for 4GB uploads)
+func SetUserClient(client *tg.Client) {
+	userClientMu.Lock()
+	activeUserClient = client
+	userClientMu.Unlock()
+}
+
+// GetUserClient safely returns the active user client
+func GetUserClient() *tg.Client {
+	userClientMu.RLock()
+	defer userClientMu.RUnlock()
+	return activeUserClient
+}
+
 // RegisterRoutes registers all bot commands and callbacks
-func RegisterRoutes(botClient, userClient *tg.Client) {
+func RegisterRoutes(botClient *tg.Client) {
 	cfg := config.Get()
 	suffix := cfg.CmdSuffix
 
@@ -17,23 +38,37 @@ func RegisterRoutes(botClient, userClient *tg.Client) {
 		return "cmd:" + name + suffix
 	}
 
+	// 0. Global incoming message logger for debugging and transparency
+	botClient.On("message", func(m *tg.NewMessage) error {
+		if m != nil && m.Text() != "" {
+			log.Printf("📩 Received message from %d (chat: %d): %q", m.SenderID(), m.ChatID(), m.Text())
+		}
+		if m != nil && m.IsCommand() {
+			c := m.GetCommand()
+			if strings.HasPrefix(c, "c_") {
+				return handlers.HandleCancel(m)
+			}
+		}
+		return nil
+	})
+
 	// 1. Core Task Commands
 	botClient.On(cmd("start"), handlers.HandleStart)
 	botClient.On(cmd("help"), handlers.HandleHelp)
 	botClient.On(cmd("h"), handlers.HandleHelp)
 
 	botClient.On(cmd("mirror"), func(m *tg.NewMessage) error {
-		return handlers.HandleMirror(m, botClient, userClient)
+		return handlers.HandleMirror(m, botClient, GetUserClient())
 	})
 	botClient.On(cmd("m"), func(m *tg.NewMessage) error {
-		return handlers.HandleMirror(m, botClient, userClient)
+		return handlers.HandleMirror(m, botClient, GetUserClient())
 	})
 
 	botClient.On(cmd("leech"), func(m *tg.NewMessage) error {
-		return handlers.HandleLeech(m, botClient, userClient)
+		return handlers.HandleLeech(m, botClient, GetUserClient())
 	})
 	botClient.On(cmd("l"), func(m *tg.NewMessage) error {
-		return handlers.HandleLeech(m, botClient, userClient)
+		return handlers.HandleLeech(m, botClient, GetUserClient())
 	})
 
 	// 2. Status & Monitoring
@@ -45,17 +80,6 @@ func RegisterRoutes(botClient, userClient *tg.Client) {
 	botClient.On(cmd("cancel"), handlers.HandleCancel)
 	botClient.On(cmd("c"), handlers.HandleCancel)
 	botClient.On(cmd("cancelall"), handlers.HandleCancelAll)
-
-	// Support dynamic prefix cancellation like /c_1234abcd
-	botClient.On("message", func(m *tg.NewMessage) error {
-		if m.IsCommand() {
-			c := m.GetCommand()
-			if strings.HasPrefix(c, "c_") {
-				return handlers.HandleCancel(m)
-			}
-		}
-		return nil
-	})
 
 	// 4. Admin & Auth
 	botClient.On(cmd("ping"), handlers.HandlePing)
@@ -77,6 +101,7 @@ func RegisterRoutes(botClient, userClient *tg.Client) {
 
 	// 6. Callback Queries
 	botClient.On("callback", func(cb *tg.CallbackQuery) error {
+		log.Printf("🔘 Received callback query from %d: %q", cb.SenderID, string(cb.Data))
 		return handlers.HandleCallback(cb, botClient)
 	})
 

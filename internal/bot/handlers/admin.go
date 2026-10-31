@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"runtime"
 	"strconv"
 	"strings"
@@ -17,10 +18,14 @@ func HandlePing(m *tg.NewMessage) error {
 	start := time.Now()
 	reply, err := m.Reply("🏓 Pong!", &tg.SendOptions{})
 	if err != nil {
+		log.Printf("⚠️ Error replying to /ping: %v", err)
 		return err
 	}
 	latency := time.Since(start).Milliseconds()
 	_, err = reply.Edit(fmt.Sprintf("🏓 <b>Pong!</b> Latency: <code>%d ms</code>", latency), &tg.SendOptions{ParseMode: "html"})
+	if err != nil {
+		log.Printf("⚠️ Error editing /ping reply: %v", err)
+	}
 	return err
 }
 

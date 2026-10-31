@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/GoLeech/GoLeech/internal/auth"
 	tg "github.com/amarnathcjd/gogram/telegram"
@@ -34,6 +35,9 @@ func HandleStart(m *tg.NewMessage) error {
 		ParseMode:   "html",
 		ReplyMarkup: markup,
 	})
+	if err != nil {
+		log.Printf("⚠️ Error replying to /start for %d: %v", senderID, err)
+	}
 	return err
 }
 
@@ -66,5 +70,8 @@ func HandleHelp(m *tg.NewMessage) error {
 ┃ ┖ <code>/ping</code> / <code>/stats</code> - Speed and resource usage`
 
 	_, err := m.Reply(text, &tg.SendOptions{ParseMode: "html"})
+	if err != nil {
+		log.Printf("⚠️ Error replying to /help for %d: %v", m.SenderID(), err)
+	}
 	return err
 }
