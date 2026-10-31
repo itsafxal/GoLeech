@@ -60,6 +60,13 @@ func RegisterRoutes(botClient *tg.Client) {
 			}
 		}
 
+		// Check for active interactive user settings prompt
+		if m.SenderID() != 0 && (m.ChatID() == m.SenderID() || m.IsReply()) {
+			if pending := handlers.GetPendingInput(m.SenderID()); pending != nil {
+				return handlers.ProcessPendingUserInput(m, pending, botClient)
+			}
+		}
+
 		// Private Chat: Auto-save user photo as custom leech thumbnail
 		if m.ChatID() == m.SenderID() && m.Photo() != nil && !m.IsCommand() {
 			thumbDir := filepath.Join("data", "thumbnails")
@@ -102,19 +109,39 @@ func RegisterRoutes(botClient *tg.Client) {
 	botClient.On(cmd("h"), handlers.HandleHelp)
 
 	// 2. Core Transfer Tasks
-	botClient.On(cmd("mirror"), func(m *tg.NewMessage) error {
+	mirrorHandler := func(m *tg.NewMessage) error {
 		return handlers.HandleMirror(m, botClient, GetUserClient())
-	})
-	botClient.On(cmd("m"), func(m *tg.NewMessage) error {
-		return handlers.HandleMirror(m, botClient, GetUserClient())
-	})
+	}
+	leechHandler := func(m *tg.NewMessage) error {
+		return handlers.HandleLeech(m, botClient, GetUserClient())
+	}
 
-	botClient.On(cmd("leech"), func(m *tg.NewMessage) error {
-		return handlers.HandleLeech(m, botClient, GetUserClient())
-	})
-	botClient.On(cmd("l"), func(m *tg.NewMessage) error {
-		return handlers.HandleLeech(m, botClient, GetUserClient())
-	})
+	botClient.On(cmd("mirror"), mirrorHandler)
+	botClient.On(cmd("m"), mirrorHandler)
+	botClient.On(cmd("qbmirror"), mirrorHandler)
+	botClient.On(cmd("qm"), mirrorHandler)
+	botClient.On(cmd("jdmirror"), mirrorHandler)
+	botClient.On(cmd("jm"), mirrorHandler)
+	botClient.On(cmd("ytdl"), mirrorHandler)
+	botClient.On(cmd("y"), mirrorHandler)
+	botClient.On(cmd("uphoster"), mirrorHandler)
+	botClient.On(cmd("up"), mirrorHandler)
+	botClient.On(cmd("nzbmirror"), mirrorHandler)
+	botClient.On(cmd("nm"), mirrorHandler)
+	botClient.On(cmd("seedrlink"), mirrorHandler)
+	botClient.On(cmd("slink"), mirrorHandler)
+	botClient.On(cmd("srlink"), mirrorHandler)
+
+	botClient.On(cmd("leech"), leechHandler)
+	botClient.On(cmd("l"), leechHandler)
+	botClient.On(cmd("qbleech"), leechHandler)
+	botClient.On(cmd("ql"), leechHandler)
+	botClient.On(cmd("jdleech"), leechHandler)
+	botClient.On(cmd("jl"), leechHandler)
+	botClient.On(cmd("ytdlleech"), leechHandler)
+	botClient.On(cmd("yl"), leechHandler)
+	botClient.On(cmd("nzbleech"), leechHandler)
+	botClient.On(cmd("nl"), leechHandler)
 
 	botClient.On(cmd("clone"), func(m *tg.NewMessage) error {
 		return handlers.HandleClone(m, botClient)
@@ -145,6 +172,21 @@ func RegisterRoutes(botClient *tg.Client) {
 	botClient.On(cmd("us"), handlers.HandleUserSettings)
 	botClient.On(cmd("bsetting"), handlers.HandleBotSettings)
 	botClient.On(cmd("bs"), handlers.HandleBotSettings)
+	botClient.On(cmd("addimage"), func(m *tg.NewMessage) error {
+		return handlers.HandleAddImage(m, botClient)
+	})
+	botClient.On(cmd("ai"), func(m *tg.NewMessage) error {
+		return handlers.HandleAddImage(m, botClient)
+	})
+	botClient.On(cmd("images"), func(m *tg.NewMessage) error {
+		return handlers.HandleImages(m, botClient)
+	})
+	botClient.On(cmd("img"), func(m *tg.NewMessage) error {
+		return handlers.HandleImages(m, botClient)
+	})
+	botClient.On(cmd("memory"), handlers.HandleMemory)
+	botClient.On(cmd("mem"), handlers.HandleMemory)
+	botClient.On(cmd("plugins"), handlers.HandlePlugins)
 	botClient.On(cmd("setthumb"), handlers.HandleSetThumb)
 	botClient.On(cmd("thumb"), handlers.HandleSetThumb)
 	botClient.On(cmd("delthumb"), handlers.HandleDelThumb)

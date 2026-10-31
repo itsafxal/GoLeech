@@ -110,6 +110,47 @@ func ProgressBar(pct float64) string {
 	return sb.String()
 }
 
+// ParseSize converts human-formatted size strings (e.g. 2GB, 2.5gb, 1000mb, 4000000000) to bytes
+func ParseSize(s string) int64 {
+	s = strings.TrimSpace(strings.ToUpper(s))
+	if s == "" {
+		return 0
+	}
+
+	var multiplier float64 = 1
+	var numStr string
+
+	if strings.HasSuffix(s, "PB") {
+		multiplier = 1024 * 1024 * 1024 * 1024 * 1024
+		numStr = strings.TrimSuffix(s, "PB")
+	} else if strings.HasSuffix(s, "TB") {
+		multiplier = 1024 * 1024 * 1024 * 1024
+		numStr = strings.TrimSuffix(s, "TB")
+	} else if strings.HasSuffix(s, "GB") {
+		multiplier = 1024 * 1024 * 1024
+		numStr = strings.TrimSuffix(s, "GB")
+	} else if strings.HasSuffix(s, "MB") {
+		multiplier = 1024 * 1024
+		numStr = strings.TrimSuffix(s, "MB")
+	} else if strings.HasSuffix(s, "KB") {
+		multiplier = 1024
+		numStr = strings.TrimSuffix(s, "KB")
+	} else if strings.HasSuffix(s, "B") {
+		multiplier = 1
+		numStr = strings.TrimSuffix(s, "B")
+	} else {
+		numStr = s
+	}
+
+	numStr = strings.TrimSpace(numStr)
+	var val float64
+	if _, err := fmt.Sscanf(numStr, "%f", &val); err == nil && val > 0 {
+		return int64(val * multiplier)
+	}
+
+	return 0
+}
+
 // CleanFilename sanitizes an input filename removing hazardous characters and paths
 func CleanFilename(name string) string {
 	name = filepath.Base(name)

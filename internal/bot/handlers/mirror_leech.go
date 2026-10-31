@@ -173,6 +173,23 @@ func runTaskPipeline(t *task.Task, origMsg, replyMsg *tg.NewMessage, botClient, 
 	// 3. Post-Download Media Processing
 	workPath := downloadedPath
 
+	var uSettings *db.UserSettings
+	if db.GlobalStore != nil {
+		uSettings, _ = db.GlobalStore.GetUserSettings(t.UserID)
+	}
+
+	// Apply Name Swap (-ns or user setting)
+	nameSwapRule := t.Options.NameSwap
+	if nameSwapRule == "" && uSettings != nil {
+		nameSwapRule = uSettings.Get("NAME_SWAP")
+	}
+	if nameSwapRule != "" {
+		newName := media.ApplyNameSwap(t.Name, nameSwapRule)
+		if newName != t.Name {
+			t.SetName(newName)
+		}
+	}
+
 	// Extract archive if requested (-e)
 	if t.Options.Extract {
 		t.SetStatus(task.StatusExtracting)
@@ -188,6 +205,27 @@ func runTaskPipeline(t *task.Task, origMsg, replyMsg *tg.NewMessage, botClient, 
 		zipPath := filepath.Join(filepath.Dir(downloadedPath), t.Name+".zip")
 		if err := media.CreateZip(t.Ctx, downloadedPath, zipPath); err == nil {
 			workPath = zipPath
+		}
+	}
+
+	// Metadata stream tagging (-meta or user setting)
+	globalMeta := t.Options.MetadataTitle
+	if globalMeta == "" && uSettings != nil {
+		globalMeta = uSettings.Get("METADATA")
+	}
+	audioMeta := ""
+	videoMeta := ""
+	subMeta := ""
+	if uSettings != nil {
+		audioMeta = uSettings.Get("AUDIO_METADATA")
+		videoMeta = uSettings.Get("VIDEO_METADATA")
+		subMeta = uSettings.Get("SUBTITLE_METADATA")
+	}
+
+	if globalMeta != "" || audioMeta != "" || videoMeta != "" || subMeta != "" {
+		t.SetStatus(task.StatusProcessing)
+		if taggedPath, err := media.ApplyMetadata(t.Ctx, workPath, globalMeta, audioMeta, videoMeta, subMeta); err == nil {
+			workPath = taggedPath
 		}
 	}
 

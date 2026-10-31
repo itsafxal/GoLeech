@@ -108,6 +108,16 @@ func (r *Registry) Close() {
 	}
 }
 
+func (r *Registry) ListPlugins() []Plugin {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var list []Plugin
+	for _, p := range r.plugins {
+		list = append(list, p)
+	}
+	return list
+}
+
 // Sample Built-in Plugin: MediaInfo
 type MediaInfoPlugin struct{}
 

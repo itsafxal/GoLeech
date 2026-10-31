@@ -12,6 +12,7 @@ import (
 
 	"github.com/GoLeech/GoLeech/internal/auth"
 	"github.com/GoLeech/GoLeech/internal/db"
+	"github.com/GoLeech/GoLeech/internal/plugin"
 	"github.com/GoLeech/GoLeech/internal/task"
 	"github.com/GoLeech/GoLeech/pkg/utils"
 	tg "github.com/amarnathcjd/gogram/telegram"
@@ -435,6 +436,74 @@ func HandleRestart(m *tg.NewMessage) error {
 	_, err := m.Reply(text, &tg.SendOptions{
 		ParseMode:   "html",
 		ReplyMarkup: markup,
+	})
+	return err
+}
+
+// HandleMemory displays detailed Go runtime memory and performance metrics
+func HandleMemory(m *tg.NewMessage) error {
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+
+	text := fmt.Sprintf(`🧠 <b><u>GoLeech — Runtime Memory & Heap Stats</u></b>
+│
+┠ <b>Allocated Memory:</b> <code>%s</code>
+┠ <b>Total Allocated:</b> <code>%s</code>
+┠ <b>System OS Memory:</b> <code>%s</code>
+┠ <b>Heap In-Use:</b> <code>%s</code>
+┠ <b>Heap Idle:</b> <code>%s</code>
+┠ <b>Heap Objects:</b> <code>%d</code>
+┠ <b>Completed GC Cycles:</b> <code>%d</code>
+┠ <b>Active Goroutines:</b> <code>%d</code>
+┖ <b>Logical CPUs:</b> <code>%d</code>`,
+		utils.FormatBytes(int64(mem.Alloc)),
+		utils.FormatBytes(int64(mem.TotalAlloc)),
+		utils.FormatBytes(int64(mem.Sys)),
+		utils.FormatBytes(int64(mem.HeapAlloc)),
+		utils.FormatBytes(int64(mem.HeapIdle)),
+		mem.HeapObjects,
+		mem.NumGC,
+		runtime.NumGoroutine(),
+		runtime.NumCPU(),
+	)
+
+	_, err := m.Reply(text, &tg.SendOptions{
+		ParseMode: "html",
+		ReplyMarkup: tg.Button.Keyboard(
+			tg.Button.Row(
+				tg.Button.Data("❌ Close", "help:close"),
+			),
+		),
+	})
+	return err
+}
+
+// HandlePlugins displays all loaded system extensions
+func HandlePlugins(m *tg.NewMessage) error {
+	var plugins []plugin.Plugin
+	if plugin.GlobalRegistry != nil {
+		plugins = plugin.GlobalRegistry.ListPlugins()
+	}
+
+	if len(plugins) == 0 {
+		_, err := m.Reply("🧩 <b>Loaded Plugins:</b> <i>No external plugins currently loaded.</i>", &tg.SendOptions{ParseMode: "html"})
+		return err
+	}
+
+	var sb strings.Builder
+	sb.WriteString("🧩 <b><u>Active GoLeech Plugins</u></b>\n│\n")
+	for i, p := range plugins {
+		sb.WriteString(fmt.Sprintf("┠ <b>%d. %s</b> (v%s)\n┃ ┖ <i>%s</i>\n", i+1, html.EscapeString(p.Name()), html.EscapeString(p.Version()), html.EscapeString(p.Description())))
+	}
+	sb.WriteString("┖ <i>All plugins run concurrently in native Go goroutines.</i>")
+
+	_, err := m.Reply(sb.String(), &tg.SendOptions{
+		ParseMode: "html",
+		ReplyMarkup: tg.Button.Keyboard(
+			tg.Button.Row(
+				tg.Button.Data("❌ Close", "help:close"),
+			),
+		),
 	})
 	return err
 }

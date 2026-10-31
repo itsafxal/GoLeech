@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -10,15 +11,36 @@ import (
 )
 
 type UserSettings struct {
-	UserID     int64  `json:"user_id"`
-	DumpChat   int64  `json:"dump_chat"`
-	Prefix     string `json:"prefix"`
-	Suffix     string `json:"suffix"`
-	Caption    string `json:"caption"`
-	SplitSize  int64  `json:"split_size"`
-	AsDoc      bool   `json:"as_doc"`
-	ThumbPath  string `json:"thumb_path"`
-	UploadDest string `json:"upload_dest"`
+	UserID     int64             `json:"user_id"`
+	DumpChat   int64             `json:"dump_chat"`
+	Prefix     string            `json:"prefix"`
+	Suffix     string            `json:"suffix"`
+	Caption    string            `json:"caption"`
+	SplitSize  int64             `json:"split_size"`
+	AsDoc      bool              `json:"as_doc"`
+	ThumbPath  string            `json:"thumb_path"`
+	UploadDest string            `json:"upload_dest"`
+	ExtraData  map[string]string `json:"extra_data"`
+}
+
+func (u *UserSettings) Get(key string) string {
+	if u.ExtraData == nil {
+		return ""
+	}
+	return u.ExtraData[key]
+}
+
+func (u *UserSettings) Set(key, val string) {
+	if u.ExtraData == nil {
+		u.ExtraData = make(map[string]string)
+	}
+	u.ExtraData[key] = val
+}
+
+func (u *UserSettings) Delete(key string) {
+	if u.ExtraData != nil {
+		delete(u.ExtraData, key)
+	}
 }
 
 type UserRecord struct {
@@ -126,6 +148,11 @@ func InitDB(dbPath string) (*Store, error) {
 		key TEXT PRIMARY KEY,
 		value TEXT
 	);
+
+	CREATE TABLE IF NOT EXISTS bot_images (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		url TEXT
+	);
 	`
 
 	if _, err := conn.Exec(schema); err != nil {
@@ -134,6 +161,7 @@ func InitDB(dbPath string) (*Store, error) {
 
 	// Safe column migration for existing databases
 	_, _ = conn.Exec("ALTER TABLE users ADD COLUMN is_blacklisted INTEGER DEFAULT 0;")
+	_, _ = conn.Exec("ALTER TABLE user_settings ADD COLUMN extra_data TEXT DEFAULT '{}';")
 
 	store := &Store{db: conn}
 	GlobalStore = store
@@ -279,10 +307,11 @@ func (s *Store) GetBotSetting(key string) (string, error) {
 func (s *Store) GetUserSettings(userID int64) (*UserSettings, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	settings := &UserSettings{UserID: userID}
+	settings := &UserSettings{UserID: userID, ExtraData: make(map[string]string)}
 	var asDocInt int
+	var extraJSON string
 	err := s.db.QueryRow(`
-		SELECT dump_chat, prefix, suffix, caption, split_size, as_doc, thumb_path, upload_dest
+		SELECT dump_chat, prefix, suffix, caption, split_size, as_doc, thumb_path, upload_dest, COALESCE(extra_data, '{}')
 		FROM user_settings WHERE user_id = ?
 	`, userID).Scan(
 		&settings.DumpChat,
@@ -293,6 +322,7 @@ func (s *Store) GetUserSettings(userID int64) (*UserSettings, error) {
 		&asDocInt,
 		&settings.ThumbPath,
 		&settings.UploadDest,
+		&extraJSON,
 	)
 	if err == sql.ErrNoRows {
 		return settings, nil
@@ -301,6 +331,12 @@ func (s *Store) GetUserSettings(userID int64) (*UserSettings, error) {
 		return nil, err
 	}
 	settings.AsDoc = (asDocInt == 1)
+	if extraJSON != "" {
+		_ = json.Unmarshal([]byte(extraJSON), &settings.ExtraData)
+	}
+	if settings.ExtraData == nil {
+		settings.ExtraData = make(map[string]string)
+	}
 	return settings, nil
 }
 
@@ -311,9 +347,13 @@ func (s *Store) SaveUserSettings(st *UserSettings) error {
 	if st.AsDoc {
 		asDocInt = 1
 	}
+	if st.ExtraData == nil {
+		st.ExtraData = make(map[string]string)
+	}
+	extraJSON, _ := json.Marshal(st.ExtraData)
 	_, err := s.db.Exec(`
-		INSERT INTO user_settings (user_id, dump_chat, prefix, suffix, caption, split_size, as_doc, thumb_path, upload_dest)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO user_settings (user_id, dump_chat, prefix, suffix, caption, split_size, as_doc, thumb_path, upload_dest, extra_data)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_id) DO UPDATE SET
 			dump_chat = excluded.dump_chat,
 			prefix = excluded.prefix,
@@ -322,8 +362,63 @@ func (s *Store) SaveUserSettings(st *UserSettings) error {
 			split_size = excluded.split_size,
 			as_doc = excluded.as_doc,
 			thumb_path = excluded.thumb_path,
-			upload_dest = excluded.upload_dest
-	`, st.UserID, st.DumpChat, st.Prefix, st.Suffix, st.Caption, st.SplitSize, asDocInt, st.ThumbPath, st.UploadDest)
+			upload_dest = excluded.upload_dest,
+			extra_data = excluded.extra_data
+	`, st.UserID, st.DumpChat, st.Prefix, st.Suffix, st.Caption, st.SplitSize, asDocInt, st.ThumbPath, st.UploadDest, string(extraJSON))
+	return err
+}
+
+func (s *Store) GetImages() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query("SELECT url FROM bot_images ORDER BY id ASC")
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var list []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err == nil {
+			list = append(list, u)
+		}
+	}
+	return list
+}
+
+func (s *Store) AddImage(url string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec("INSERT INTO bot_images (url) VALUES (?)", url)
+	return err
+}
+
+func (s *Store) RemoveImage(index int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	images := []int64{}
+	rows, err := s.db.Query("SELECT id FROM bot_images ORDER BY id ASC")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err == nil {
+			images = append(images, id)
+		}
+	}
+	if index >= 0 && index < len(images) {
+		_, err = s.db.Exec("DELETE FROM bot_images WHERE id = ?", images[index])
+		return err
+	}
+	return nil
+}
+
+func (s *Store) ClearImages() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec("DELETE FROM bot_images")
 	return err
 }
 

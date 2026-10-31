@@ -13,14 +13,13 @@ import (
 	"github.com/GoLeech/GoLeech/internal/config"
 	"github.com/GoLeech/GoLeech/internal/db"
 	"github.com/GoLeech/GoLeech/internal/task"
-	"github.com/GoLeech/GoLeech/pkg/utils"
 	tg "github.com/amarnathcjd/gogram/telegram"
 )
 
 // HandleUserSettings opens the interactive user preferences panel
 func HandleUserSettings(m *tg.NewMessage) error {
 	senderID := m.SenderID()
-	text, markup := RenderUserSettings(senderID)
+	text, markup := GetUserSettingsFull(senderID, "main")
 
 	_, err := m.Reply(text, &tg.SendOptions{
 		ParseMode:   "html",
@@ -31,110 +30,7 @@ func HandleUserSettings(m *tg.NewMessage) error {
 
 // RenderUserSettings generates the user settings card and inline keyboard
 func RenderUserSettings(userID int64) (string, tg.ReplyMarkup) {
-	var st *db.UserSettings
-	if db.GlobalStore != nil {
-		st, _ = db.GlobalStore.GetUserSettings(userID)
-	}
-	if st == nil {
-		st = &db.UserSettings{UserID: userID}
-	}
-
-	docBadge := "🎥 Media Stream"
-	docToggleLabel := "Mode: 🎥 Media"
-	if st.AsDoc {
-		docBadge = "📄 Uncompressed Document"
-		docToggleLabel = "Mode: 📄 Document"
-	}
-
-	splitLabel := "2 GB (Standard)"
-	splitToggleLabel := "Split: 2 GB"
-	if st.SplitSize > 2147483648 {
-		splitLabel = "4 GB (Telegram Premium)"
-		splitToggleLabel = "Split: 4 GB"
-	} else if st.SplitSize > 0 && st.SplitSize != 2097152000 {
-		splitLabel = utils.FormatBytes(st.SplitSize)
-	}
-
-	prefixStr := "<i>None</i>"
-	if st.Prefix != "" {
-		prefixStr = fmt.Sprintf("<code>%s</code>", html.EscapeString(st.Prefix))
-	}
-
-	suffixStr := "<i>None</i>"
-	if st.Suffix != "" {
-		suffixStr = fmt.Sprintf("<code>%s</code>", html.EscapeString(st.Suffix))
-	}
-
-	captionStr := "<i>Default</i>"
-	if st.Caption != "" {
-		captionStr = fmt.Sprintf("<code>%s</code>", html.EscapeString(st.Caption))
-	}
-
-	dumpStr := "<i>Disabled</i>"
-	if st.DumpChat != 0 {
-		dumpStr = fmt.Sprintf("<code>%d</code>", st.DumpChat)
-	}
-
-	thumbStatus := "❌ <i>Not Set</i>"
-	if st.ThumbPath != "" {
-		if _, err := os.Stat(st.ThumbPath); err == nil {
-			thumbStatus = "✅ <i>Custom Thumbnail Active</i>"
-		}
-	}
-
-	remoteStr := "<i>Default Cloud</i>"
-	if st.UploadDest != "" {
-		remoteStr = fmt.Sprintf("<code>%s</code>", html.EscapeString(st.UploadDest))
-	}
-
-	text := fmt.Sprintf(`⌬ <b><u>Personal Leech & Mirror Settings</u></b>
-│
-┠ <b>Target User:</b> <code>#ID%d</code>
-┠ <b>Leech Mode:</b> <b>%s</b>
-┠ <b>Split Size:</b> <b>%s</b>
-┠ <b>Prefix:</b> %s
-┠ <b>Suffix:</b> %s
-┠ <b>Custom Caption:</b> %s
-┠ <b>Dump Channel:</b> %s
-┠ <b>Default Remote:</b> %s
-┖ <b>Thumbnail:</b> %s
-
-<i>💡 Tap any button below to toggle preferences instantly:</i>`,
-		userID,
-		docBadge,
-		splitLabel,
-		prefixStr,
-		suffixStr,
-		captionStr,
-		dumpStr,
-		remoteStr,
-		thumbStatus,
-	)
-
-	markup := tg.Button.Keyboard(
-		tg.Button.Row(
-			tg.Button.Data(docToggleLabel, fmt.Sprintf("usetting:toggle_doc:%d", userID)),
-			tg.Button.Data(splitToggleLabel, fmt.Sprintf("usetting:toggle_split:%d", userID)),
-		),
-		tg.Button.Row(
-			tg.Button.Data("🖼 View Thumb", fmt.Sprintf("usetting:view_thumb:%d", userID)),
-			tg.Button.Data("🗑 Delete Thumb", fmt.Sprintf("usetting:del_thumb:%d", userID)),
-		),
-		tg.Button.Row(
-			tg.Button.Data("🏷 Set Prefix", fmt.Sprintf("usetting:info_prefix:%d", userID)),
-			tg.Button.Data("🏷 Set Suffix", fmt.Sprintf("usetting:info_suffix:%d", userID)),
-		),
-		tg.Button.Row(
-			tg.Button.Data("📝 Set Caption", fmt.Sprintf("usetting:info_caption:%d", userID)),
-			tg.Button.Data("📺 Set Dump", fmt.Sprintf("usetting:info_dump:%d", userID)),
-		),
-		tg.Button.Row(
-			tg.Button.Data("♻️ Refresh", fmt.Sprintf("usetting:refresh:%d", userID)),
-			tg.Button.Data("❌ Close", "usetting:close"),
-		),
-	)
-
-	return text, markup
+	return GetUserSettingsFull(userID, "main")
 }
 
 // HandleBotSettings opens the runtime control center for Sudo administrators
@@ -253,6 +149,14 @@ func RenderBotSettings() (string, tg.ReplyMarkup) {
 func HandleCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 	data := cb.DataString()
 	senderID := cb.SenderID
+
+	// 0. WZML-X Native User Settings & Gallery Callbacks
+	if strings.HasPrefix(data, "userset ") {
+		return HandleUsersetCallback(cb, botClient)
+	}
+	if strings.HasPrefix(data, "images ") {
+		return HandleImageCallback(cb, botClient)
+	}
 
 	// 1. Task Cancellation
 	if strings.HasPrefix(data, "cancel:") {

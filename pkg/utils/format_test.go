@@ -101,3 +101,15 @@ func TestCleanFilename(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSize(t *testing.T) {
+	if ParseSize("2GB") != 2147483648 {
+		t.Errorf("expected 2147483648 for 2GB, got %d", ParseSize("2GB"))
+	}
+	if ParseSize("500MB") != 524288000 {
+		t.Errorf("expected 524288000 for 500MB, got %d", ParseSize("500MB"))
+	}
+	if ParseSize("1024") != 1024 {
+		t.Errorf("expected 1024, got %d", ParseSize("1024"))
+	}
+}

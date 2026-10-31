@@ -134,13 +134,27 @@ func GenerateSampleVideo(ctx context.Context, videoPath string) (string, error) 
 
 // SplitFile divides large files into chunks smaller than maxBytes (e.g. 2GB)
 func SplitFile(srcPath string, maxBytes int64) ([]string, error) {
+	return SplitFileCustom(srcPath, maxBytes, false)
+}
+
+// SplitFileCustom divides large files with optional equal chunk distribution
+func SplitFileCustom(srcPath string, maxBytes int64, equalSplits bool) ([]string, error) {
 	srcInfo, err := os.Stat(srcPath)
 	if err != nil {
 		return nil, err
 	}
 
-	if srcInfo.Size() <= maxBytes {
+	totalSize := srcInfo.Size()
+	if totalSize <= maxBytes {
 		return []string{srcPath}, nil
+	}
+
+	chunkSize := maxBytes
+	if equalSplits {
+		numParts := (totalSize + maxBytes - 1) / maxBytes
+		if numParts > 1 {
+			chunkSize = (totalSize + numParts - 1) / numParts
+		}
 	}
 
 	srcFile, err := os.Open(srcPath)
@@ -161,10 +175,10 @@ func SplitFile(srcPath string, maxBytes int64) ([]string, error) {
 		}
 
 		var written int64
-		for written < maxBytes {
+		for written < chunkSize {
 			toRead := int64(len(buf))
-			if maxBytes-written < toRead {
-				toRead = maxBytes - written
+			if chunkSize-written < toRead {
+				toRead = chunkSize - written
 			}
 
 			n, rErr := srcFile.Read(buf[:toRead])

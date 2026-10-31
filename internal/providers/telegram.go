@@ -52,7 +52,12 @@ func (u *TelegramUploader) Upload(ctx context.Context, t *task.Task, filePath st
 		splitLimit = t.Options.SplitSize
 	}
 
-	parts, err := media.SplitFile(filePath, splitLimit)
+	equalSplits := false
+	if uSettings != nil && uSettings.Get("EQUAL_SPLITS") == "true" {
+		equalSplits = true
+	}
+
+	parts, err := media.SplitFileCustom(filePath, splitLimit, equalSplits)
 	if err != nil {
 		return nil, fmt.Errorf("splitting file failed: %w", err)
 	}
