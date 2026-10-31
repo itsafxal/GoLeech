@@ -331,17 +331,15 @@ func runTaskPipeline(t *task.Task, origMsg, notifyMsg, replyMsg *tg.NewMessage, 
 			suffix = cfg.LeechSuffix
 		}
 
-		if prefix != "" || suffix != "" {
-			if fi, err := os.Stat(workPath); err == nil && !fi.IsDir() {
-				dir := filepath.Dir(workPath)
-				origName := filepath.Base(workPath)
-				newName := utils.ApplyPrefixSuffix(origName, prefix, suffix)
-				if newName != origName {
-					newPath := filepath.Join(dir, newName)
-					if err := os.Rename(workPath, newPath); err == nil {
-						workPath = newPath
-						t.SetName(newName)
-					}
+		if fi, err := os.Stat(workPath); err == nil && !fi.IsDir() {
+			dir := filepath.Dir(workPath)
+			origName := filepath.Base(workPath)
+			newName := utils.ApplyPrefixSuffix(origName, prefix, suffix)
+			if newName != origName {
+				newPath := filepath.Join(dir, newName)
+				if err := os.Rename(workPath, newPath); err == nil {
+					workPath = newPath
+					t.SetName(newName)
 				}
 			}
 		}

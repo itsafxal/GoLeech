@@ -59,7 +59,7 @@ func (d *Downloader) DownloadMedia(ctx context.Context, msg *tg.NewMessage, t *t
 		filename = fmt.Sprintf("tg_%d_%d.bin", msg.ChatID(), msg.ID)
 	}
 
-	filename = utils.CleanFilename(filename)
+	filename = utils.CleanMediaFilename(filename, "")
 	t.SetName(filename)
 	destPath := filepath.Join(taskDir, filename)
 

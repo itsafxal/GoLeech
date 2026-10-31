@@ -13,8 +13,27 @@ var (
 	templateVarRegex = regexp.MustCompile(`(?i)(\{([a-zA-Z0-9_]+)\}|%\(([a-zA-Z0-9_]+)\))`)
 )
 
+// CaptionContext carries comprehensive media details and metadata for template evaluation
+type CaptionContext struct {
+	Filename    string
+	Size        int64
+	PartNum     int
+	TotalParts  int
+	Username    string
+	UserID      string
+	Width       int
+	Height      int
+	DurationSec int64
+	Quality     string
+	Languages   string
+	Subtitles   string
+	MimeType    string
+	OrigCaption string
+	FileID      string
+}
+
 // ApplyPrefixSuffix transforms a filename by attaching prefix to the start and suffix before the extension.
-// It prevents duplicate extensions (e.g. .mkv.mkv) and properly parses \s escape characters.
+// It cleans unnecessary tags and prevents duplicate prefixes or extensions.
 func ApplyPrefixSuffix(filename, prefix, suffix string) string {
 	filename = strings.TrimSpace(filename)
 	if filename == "" {
@@ -25,22 +44,25 @@ func ApplyPrefixSuffix(filename, prefix, suffix string) string {
 	prefix = strings.ReplaceAll(prefix, "\\s", " ")
 	suffix = strings.ReplaceAll(suffix, "\\s", " ")
 
-	ext := filepath.Ext(filename)
-	base := strings.TrimSuffix(filename, ext)
+	// 1. Clean the filename and deduplicate configured prefix
+	cleaned := CleanMediaFilename(filename, prefix)
 
-	// 1. Apply Prefix
+	ext := filepath.Ext(cleaned)
+	base := strings.TrimSuffix(cleaned, ext)
+
+	// 2. Apply Prefix
 	if prefix != "" {
 		cleanPrefix := prefix
+		if !strings.HasSuffix(cleanPrefix, " ") {
+			cleanPrefix += " "
+		}
 		trimmedPrefix := strings.TrimSpace(cleanPrefix)
 		if trimmedPrefix != "" && !strings.HasPrefix(base, trimmedPrefix) {
-			if !strings.HasSuffix(cleanPrefix, " ") {
-				cleanPrefix += " "
-			}
 			base = cleanPrefix + base
 		}
 	}
 
-	// 2. Apply Suffix (placed before extension)
+	// 3. Apply Suffix (placed before extension)
 	if suffix != "" {
 		cleanSuffix := suffix
 		// Prevent duplicate extension (e.g. if suffix is ".mkv" or " [1080p].mkv" and ext is ".mkv")
@@ -120,13 +142,16 @@ func ReplaceTemplateVars(template string, vars map[string]string) string {
 	})
 }
 
-// FormatCaption formats a complete leech caption using standard layout or user template
-func FormatCaption(template, filename string, size int64, partNum, totalParts int, username, userID string, width, height int, durationSec int64) string {
-	quality := DetectQuality(filename, width, height)
+// FormatCaption formats a complete leech caption using standard layout or user template with full metadata support
+func FormatCaption(template string, ctx CaptionContext) string {
+	quality := ctx.Quality
+	if quality == "" {
+		quality = DetectQuality(ctx.Filename, ctx.Width, ctx.Height)
+	}
 
 	resolution := ""
-	if width > 0 && height > 0 {
-		resolution = fmt.Sprintf("%dx%d", width, height)
+	if ctx.Width > 0 && ctx.Height > 0 {
+		resolution = fmt.Sprintf("%dx%d", ctx.Width, ctx.Height)
 	} else if quality != "" {
 		resolution = quality
 	} else {
@@ -134,57 +159,90 @@ func FormatCaption(template, filename string, size int64, partNum, totalParts in
 	}
 
 	durationStr := ""
-	if durationSec > 0 {
-		durationStr = FormatSeconds(durationSec)
+	if ctx.DurationSec > 0 {
+		durationStr = FormatSeconds(ctx.DurationSec)
 	} else {
 		durationStr = "N/A"
 	}
 
-	ext := strings.TrimPrefix(filepath.Ext(filename), ".")
+	languages := ctx.Languages
+	if languages == "" {
+		languages = DetectLanguages(ctx.Filename)
+	}
+	if languages == "" {
+		languages = "N/A"
+	}
+
+	subtitles := ctx.Subtitles
+	if subtitles == "" {
+		subtitles = DetectSubtitles(ctx.Filename)
+	}
+	if subtitles == "" {
+		subtitles = "None"
+	}
+
+	mimeType := ctx.MimeType
+	if mimeType == "" {
+		mimeType = DetectMimeType(ctx.Filename)
+	}
+
+	fileID := ctx.FileID
+	if fileID == "" {
+		fileID = "N/A"
+	}
+
+	ext := strings.TrimPrefix(filepath.Ext(ctx.Filename), ".")
 	if ext == "" {
 		ext = "file"
 	}
 
-	cleanUsername := username
+	cleanUsername := ctx.Username
 	if cleanUsername != "" && !strings.HasPrefix(cleanUsername, "@") {
 		cleanUsername = "@" + cleanUsername
 	}
 
-	sizeStr := FormatBytes(size)
+	sizeStr := FormatBytes(ctx.Size)
 
 	// If template is empty, return default standard GoLeech caption
 	if strings.TrimSpace(template) == "" {
 		var sb strings.Builder
-		sb.WriteString("<code>" + html.EscapeString(filename) + "</code>\n\n")
+		sb.WriteString("<code>" + html.EscapeString(ctx.Filename) + "</code>\n\n")
 		sb.WriteString("┠ <b>ꜱɪᴢᴇ:</b> " + sizeStr)
-		if totalParts > 1 {
-			sb.WriteString(fmt.Sprintf("\n┠ <b>ᴘᴀʀᴛ:</b> %d / %d", partNum, totalParts))
+		if ctx.TotalParts > 1 {
+			sb.WriteString(fmt.Sprintf("\n┠ <b>ᴘᴀʀᴛ:</b> %d / %d", ctx.PartNum, ctx.TotalParts))
 		}
 		if cleanUsername != "" {
 			sb.WriteString("\n┠ <b>ʙʏ:</b> " + cleanUsername)
 		}
-		return sb.String()
+		return truncateCaption(sb.String())
 	}
 
 	vars := map[string]string{
-		"filename":   filename,
-		"name":       filename,
+		"filename":   ctx.Filename,
+		"name":       ctx.Filename,
 		"size":       sizeStr,
 		"quality":    quality,
 		"resolution": resolution,
 		"duration":   durationStr,
+		"language":   languages,
+		"languages":  languages,
+		"subtitles":  subtitles,
+		"subtitle":   subtitles,
+		"subs":       subtitles,
+		"caption":    ctx.OrigCaption,
+		"mime_type":  mimeType,
+		"mimetype":   mimeType,
+		"file_id":    fileID,
+		"task_id":    fileID,
+		"gid":        fileID,
 		"user":       cleanUsername,
 		"username":   cleanUsername,
-		"userid":     userID,
-		"user_id":    userID,
-		"part":       fmt.Sprintf("%d", partNum),
-		"total":      fmt.Sprintf("%d", totalParts),
+		"userid":     ctx.UserID,
+		"user_id":    ctx.UserID,
+		"part":       fmt.Sprintf("%d", ctx.PartNum),
+		"total":      fmt.Sprintf("%d", ctx.TotalParts),
 		"ext":        ext,
 		"format":     ext,
-		"languages":  "Default",
-		"language":   "Default",
-		"subtitles":  "None",
-		"subs":       "None",
 	}
 
 	formatted := ReplaceTemplateVars(template, vars)
@@ -193,21 +251,45 @@ func FormatCaption(template, filename string, size int64, partNum, totalParts in
 	if !strings.Contains(lowerTmpl, "{filename}") && !strings.Contains(lowerTmpl, "{name}") &&
 		!strings.Contains(lowerTmpl, "%(filename)") && !strings.Contains(lowerTmpl, "%(name)") {
 		var sb strings.Builder
-		sb.WriteString("<code>" + html.EscapeString(filename) + "</code>\n\n")
+		sb.WriteString("<code>" + html.EscapeString(ctx.Filename) + "</code>\n\n")
 		sb.WriteString("┠ <b>ꜱɪᴢᴇ:</b> " + sizeStr)
-		if totalParts > 1 {
-			sb.WriteString(fmt.Sprintf("\n┠ <b>ᴘᴀʀᴛ:</b> %d / %d", partNum, totalParts))
+		if ctx.TotalParts > 1 {
+			sb.WriteString(fmt.Sprintf("\n┠ <b>ᴘᴀʀᴛ:</b> %d / %d", ctx.PartNum, ctx.TotalParts))
 		}
 		if cleanUsername != "" {
 			sb.WriteString("\n┠ <b>ʙʏ:</b> " + cleanUsername)
 		}
 		sb.WriteString("\n\n" + formatted)
-		return sb.String()
+		return truncateCaption(sb.String())
 	}
 
-	if totalParts > 1 && !strings.Contains(lowerTmpl, "{part}") && !strings.Contains(lowerTmpl, "%(part)") {
-		formatted += fmt.Sprintf("\n\n┠ <b>ᴘᴀʀᴛ:</b> %d / %d", partNum, totalParts)
+	if ctx.TotalParts > 1 && !strings.Contains(lowerTmpl, "{part}") && !strings.Contains(lowerTmpl, "%(part)") {
+		formatted += fmt.Sprintf("\n\n┠ <b>ᴘᴀʀᴛ:</b> %d / %d", ctx.PartNum, ctx.TotalParts)
 	}
 
-	return formatted
+	return truncateCaption(formatted)
+}
+
+// FormatCaptionSimple provides backward-compatibility for simple parameter callers
+func FormatCaptionSimple(template, filename string, size int64, partNum, totalParts int, username, userID string, width, height int, durationSec int64) string {
+	return FormatCaption(template, CaptionContext{
+		Filename:    filename,
+		Size:        size,
+		PartNum:     partNum,
+		TotalParts:  totalParts,
+		Username:    username,
+		UserID:      userID,
+		Width:       width,
+		Height:      height,
+		DurationSec: durationSec,
+	})
+}
+
+// truncateCaption ensures the final caption string stays within Telegram's 1024-character caption limit
+func truncateCaption(s string) string {
+	runes := []rune(s)
+	if len(runes) <= 1024 {
+		return s
+	}
+	return string(runes[:1021]) + "..."
 }

@@ -14,18 +14,70 @@ import (
 )
 
 type VideoMetadata struct {
-	Duration float64 `json:"duration"`
-	Width    int     `json:"width"`
-	Height   int     `json:"height"`
-	Codec    string  `json:"codec"`
+	Duration  float64  `json:"duration"`
+	Width     int      `json:"width"`
+	Height    int      `json:"height"`
+	Codec     string   `json:"codec"`
+	Languages []string `json:"languages"`
+	Subtitles []string `json:"subtitles"`
+	MimeType  string   `json:"mime_type"`
 }
 
-// GetVideoMetadata probes video files for duration, dimensions, and codec
+func (v *VideoMetadata) GetLanguageString() string {
+	if v == nil || len(v.Languages) == 0 {
+		return ""
+	}
+	return strings.Join(v.Languages, ", ")
+}
+
+func (v *VideoMetadata) GetSubtitleString() string {
+	if v == nil || len(v.Subtitles) == 0 {
+		return ""
+	}
+	return strings.Join(v.Subtitles, ", ")
+}
+
+var isoLangMap = map[string]string{
+	"hin": "Hindi", "tam": "Tamil", "tel": "Telugu", "eng": "English",
+	"mal": "Malayalam", "kan": "Kannada", "ben": "Bengali", "mar": "Marathi",
+	"guj": "Gujarati", "pan": "Punjabi", "urd": "Urdu", "kor": "Korean",
+	"jpn": "Japanese", "chi": "Chinese", "zho": "Chinese", "spa": "Spanish",
+	"fre": "French", "fra": "French", "ger": "German", "deu": "German",
+	"rus": "Russian", "ita": "Italian", "ara": "Arabic", "por": "Portuguese",
+	"hi": "Hindi", "ta": "Tamil", "te": "Telugu", "en": "English",
+	"ml": "Malayalam", "kn": "Kannada", "bn": "Bengali", "mr": "Marathi",
+	"gu": "Gujarati", "pa": "Punjabi", "ur": "Urdu", "ko": "Korean",
+	"ja": "Japanese", "zh": "Chinese", "es": "Spanish", "fr": "French",
+	"de": "German", "ru": "Russian", "it": "Italian", "ar": "Arabic",
+}
+
+func resolveLanguage(code, title string) string {
+	code = strings.ToLower(strings.TrimSpace(code))
+	if name, ok := isoLangMap[code]; ok {
+		return name
+	}
+	if title != "" {
+		lowerTitle := strings.ToLower(title)
+		for k, v := range isoLangMap {
+			if strings.Contains(lowerTitle, k) || strings.Contains(lowerTitle, strings.ToLower(v)) {
+				return v
+			}
+		}
+		if len(title) <= 20 {
+			return strings.Title(strings.ToLower(title))
+		}
+	}
+	if len(code) == 2 || len(code) == 3 {
+		return strings.ToUpper(code)
+	}
+	return ""
+}
+
+// GetVideoMetadata probes video files for duration, dimensions, codec, languages, and subtitles
 func GetVideoMetadata(ctx context.Context, videoPath string) (*VideoMetadata, error) {
 	cmd := exec.CommandContext(ctx, "ffprobe",
 		"-v", "error",
-		"-select_streams", "v:0",
-		"-show_entries", "stream=width,height,codec_name,duration:format=duration",
+		"-show_entries", "stream=index,codec_type,width,height,codec_name,duration:stream_tags=language,title:format=duration",
 		"-of", "json",
 		videoPath,
 	)
@@ -37,10 +89,15 @@ func GetVideoMetadata(ctx context.Context, videoPath string) (*VideoMetadata, er
 
 	var data struct {
 		Streams []struct {
+			CodecType string `json:"codec_type"`
 			Width     int    `json:"width"`
 			Height    int    `json:"height"`
 			CodecName string `json:"codec_name"`
 			Duration  string `json:"duration"`
+			Tags      struct {
+				Language string `json:"language"`
+				Title    string `json:"title"`
+			} `json:"tags"`
 		} `json:"streams"`
 		Format struct {
 			Duration string `json:"duration"`
@@ -52,12 +109,45 @@ func GetVideoMetadata(ctx context.Context, videoPath string) (*VideoMetadata, er
 	}
 
 	meta := &VideoMetadata{}
-	if len(data.Streams) > 0 {
-		meta.Width = data.Streams[0].Width
-		meta.Height = data.Streams[0].Height
-		meta.Codec = data.Streams[0].CodecName
-		if d, err := strconv.ParseFloat(data.Streams[0].Duration, 64); err == nil && d > 0 {
-			meta.Duration = d
+	for _, s := range data.Streams {
+		if s.CodecType == "video" && meta.Width == 0 {
+			meta.Width = s.Width
+			meta.Height = s.Height
+			meta.Codec = s.CodecName
+			if d, err := strconv.ParseFloat(s.Duration, 64); err == nil && d > 0 {
+				meta.Duration = d
+			}
+		} else if s.CodecType == "audio" {
+			lang := resolveLanguage(s.Tags.Language, s.Tags.Title)
+			if lang != "" {
+				found := false
+				for _, existing := range meta.Languages {
+					if strings.EqualFold(existing, lang) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					meta.Languages = append(meta.Languages, lang)
+				}
+			}
+		} else if s.CodecType == "subtitle" {
+			sub := resolveLanguage(s.Tags.Language, s.Tags.Title)
+			if sub == "" && s.Tags.Title != "" {
+				sub = s.Tags.Title
+			}
+			if sub != "" {
+				found := false
+				for _, existing := range meta.Subtitles {
+					if strings.EqualFold(existing, sub) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					meta.Subtitles = append(meta.Subtitles, sub)
+				}
+			}
 		}
 	}
 

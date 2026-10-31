@@ -83,17 +83,15 @@ func (u *TelegramUploader) Upload(ctx context.Context, t *task.Task, filePath st
 		suffix = cfg.LeechSuffix
 	}
 
-	if prefix != "" || suffix != "" {
-		if fi, err := os.Stat(filePath); err == nil && !fi.IsDir() {
-			dir := filepath.Dir(filePath)
-			origName := filepath.Base(filePath)
-			newName := utils.ApplyPrefixSuffix(origName, prefix, suffix)
-			if newName != origName {
-				newPath := filepath.Join(dir, newName)
-				if err := os.Rename(filePath, newPath); err == nil {
-					filePath = newPath
-					t.SetName(newName)
-				}
+	if fi, err := os.Stat(filePath); err == nil && !fi.IsDir() {
+		dir := filepath.Dir(filePath)
+		origName := filepath.Base(filePath)
+		newName := utils.ApplyPrefixSuffix(origName, prefix, suffix)
+		if newName != origName {
+			newPath := filepath.Join(dir, newName)
+			if err := os.Rename(filePath, newPath); err == nil {
+				filePath = newPath
+				t.SetName(newName)
 			}
 		}
 	}
@@ -240,13 +238,30 @@ func buildCaption(filename string, size int64, partNum, totalParts int, t *task.
 		userCaption = cfg.LeechCaption
 	}
 
-	var width, height int
-	var durationSec int64
-	if meta != nil {
-		width = meta.Width
-		height = meta.Height
-		durationSec = int64(meta.Duration)
+	captionCtx := utils.CaptionContext{
+		Filename:   filename,
+		Size:       size,
+		PartNum:    partNum,
+		TotalParts: totalParts,
+		Username:   t.UserName,
+		UserID:     fmt.Sprintf("%d", t.UserID),
+		FileID:     t.GID,
 	}
 
-	return utils.FormatCaption(userCaption, filename, size, partNum, totalParts, t.UserName, fmt.Sprintf("%d", t.UserID), width, height, durationSec)
+	if t.Options.AudioCaption != "" {
+		captionCtx.OrigCaption = t.Options.AudioCaption
+	} else if t.Options.VideoCaption != "" {
+		captionCtx.OrigCaption = t.Options.VideoCaption
+	}
+
+	if meta != nil {
+		captionCtx.Width = meta.Width
+		captionCtx.Height = meta.Height
+		captionCtx.DurationSec = int64(meta.Duration)
+		captionCtx.Languages = meta.GetLanguageString()
+		captionCtx.Subtitles = meta.GetSubtitleString()
+		captionCtx.MimeType = meta.MimeType
+	}
+
+	return utils.FormatCaption(userCaption, captionCtx)
 }

@@ -1223,9 +1223,37 @@ func HandleUsersetCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 			}
 			SetPendingInput(targetUID, opt, info.ParentPage)
 
-			promptText := typography.ToSmallCapsHTML(fmt.Sprintf(`⚜ <b><u>Set %s</u></b>
+			var promptText string
+			if opt == "LEECH_CAPTION" {
+				promptText = typography.ToSmallCapsHTML(fmt.Sprintf(`⚜ <b><u>%s</u></b>
+│
+<raw><b>Supported Placeholders:</b>
+• <code>{filename}</code> – File name
+• <code>{size}</code> – File size (e.g. 1.25 GB)
+• <code>{duration}</code> – Media duration (e.g. 01:45:20)
+• <code>{quality}</code> – Video / audio quality (e.g. 1080p, HDRip)
+• <code>{language}</code> – Audio language (e.g. Tamil, English)
+• <code>{subtitles}</code> – Subtitle stream info (e.g. English, None)
+• <code>{caption}</code> – Original media caption
+• <code>{mime_type}</code> – Media MIME type (e.g. video/x-matroska)
+• <code>{file_id}</code> – Internal task identifier
+
+<b>Copyable Template Example:</b>
+<pre>📁 File Name: {filename}
+
+📦 Size: {size}
+⏱ Duration: {duration}
+🎬 Quality: {quality}
+🌐 Language: {language}
+💬 Subtitles: {subtitles}</pre>
+
+<i>Send your custom caption template now. HTML tags (&lt;b&gt;, &lt;i&gt;, &lt;code&gt;) are supported.</i>
+⏳ <b>Time Left:</b> <code>60 sec</code></raw>`, "Leech Caption Template Editor"))
+			} else {
+				promptText = typography.ToSmallCapsHTML(fmt.Sprintf(`⚜ <b><u>Set %s</u></b>
 │
 %s`, info.Title, info.Prompt))
+			}
 
 			markup := typography.FormatMarkup(tg.Button.Keyboard(
 				tg.Button.Row(
