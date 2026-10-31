@@ -9,6 +9,7 @@ import (
 
 	"github.com/GoLeech/GoLeech/internal/config"
 	"github.com/GoLeech/GoLeech/internal/db"
+	"github.com/GoLeech/GoLeech/pkg/utils"
 )
 
 type Manager struct {
@@ -54,6 +55,9 @@ func (m *Manager) AddTask(t *Task) {
 }
 
 func (m *Manager) GetTask(gid string) *Task {
+	if m == nil {
+		return nil
+	}
 	m.tasksMu.RLock()
 	defer m.tasksMu.RUnlock()
 
@@ -72,6 +76,9 @@ func (m *Manager) GetTask(gid string) *Task {
 }
 
 func (m *Manager) GetAllTasks() []*Task {
+	if m == nil {
+		return nil
+	}
 	m.tasksMu.RLock()
 	defer m.tasksMu.RUnlock()
 	list := make([]*Task, 0, len(m.tasks))
@@ -230,6 +237,24 @@ func (m *Manager) CancelTask(gid string, requestingUserID int64, isSudo bool) (b
 	t.Cancel("Cancelled by user request")
 	m.RemoveTask(t.GID)
 	return true, fmt.Sprintf("Task <code>%s</code> (<b>%s</b>) cancelled successfully.", t.GID, t.Name)
+}
+
+// ForceStartTask forces a queued task to bypass queue limits and run immediately
+func (m *Manager) ForceStartTask(gid string, requestingUserID int64, isSudo bool) (bool, string) {
+	t := m.GetTask(gid)
+	if t == nil {
+		return false, "Task not found."
+	}
+
+	if !isSudo && t.UserID != requestingUserID {
+		return false, "You do not have permission to force-start this task."
+	}
+
+	if t.Options == nil {
+		t.Options = &utils.TaskOptions{}
+	}
+	t.Options.ForceStart = true
+	return true, fmt.Sprintf("Task <code>%s</code> (<b>%s</b>) has been promoted to run immediately!", t.GID, t.Name)
 }
 
 // CancelAll cancels all tasks matching filter ("all", "dl", "up")

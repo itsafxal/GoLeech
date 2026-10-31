@@ -7,28 +7,40 @@ import (
 
 // TaskOptions holds flags parsed from commands like /mirror and /leech
 type TaskOptions struct {
-	Link         string
-	Name         string
-	AsDocument   bool
-	AsMedia      bool
-	Extract      bool
-	Zip          bool
-	SampleVideo  bool
-	Screenshot   bool
-	ForceStart   bool
-	SelectFiles  bool
-	Bulk         bool
-	MultiCount   int
-	SplitSize    int64
-	UploadDest   string // Cloud destination path or GDrive ID or Rclone remote:path
-	DumpChat     string // Leech dump channel ID or name
-	CustomThumb  string
-	AudioCaption string
-	VideoCaption string
-	CustomHeader string
-	AuthUser     string
-	AuthPass     string
-	ExtraArgs    map[string]string
+	Link          string
+	Name          string
+	AsDocument    bool
+	AsMedia       bool
+	Extract       bool
+	Zip           bool
+	SampleVideo   bool
+	Screenshot    bool
+	ForceStart    bool
+	SelectFiles   bool
+	Bulk          bool
+	MultiCount    int
+	SplitSize     int64
+	UploadDest    string // Cloud destination path or GDrive ID or Rclone remote:path
+	DumpChat      string // Leech dump channel ID or name
+	CustomThumb   string
+	AudioCaption  string
+	VideoCaption  string
+	CustomHeader  string
+	AuthUser      string
+	AuthPass      string
+	Subfolder     string // -m <folder>
+	ConvertAudio  string // -ca <mp3/aac/flac>
+	ConvertVideo  string // -cv <mp4/mkv/webm>
+	NameSwap      string // -ns <find:replace>
+	MetadataTitle string // -meta <title>
+	FFmpegArgs    string // -ff <custom args>
+	TrimLength    string // -tl <duration>
+	DownloadOnly  bool   // -d
+	JoinParts     bool   // -j
+	AudioOnly     bool   // -ad (extract audio from video)
+	RcloneFlags   string // -rcf <custom rclone flags>
+	SeedrToken    string // -seedr <token>
+	ExtraArgs     map[string]string
 }
 
 // ParseTaskOptions parses command string tokens into structured TaskOptions
@@ -104,6 +116,57 @@ func ParseTaskOptions(input string) *TaskOptions {
 		case "-ap":
 			if i+1 < len(tokens) {
 				opts.AuthPass = tokens[i+1]
+				i++
+			}
+		case "-d":
+			opts.DownloadOnly = true
+		case "-j":
+			opts.JoinParts = true
+		case "-ad":
+			opts.AudioOnly = true
+		case "-m":
+			if i+1 < len(tokens) {
+				opts.Subfolder = tokens[i+1]
+				i++
+			}
+		case "-ca":
+			if i+1 < len(tokens) {
+				opts.ConvertAudio = tokens[i+1]
+				i++
+			}
+		case "-cv":
+			if i+1 < len(tokens) {
+				opts.ConvertVideo = tokens[i+1]
+				i++
+			}
+		case "-ns":
+			if i+1 < len(tokens) {
+				opts.NameSwap = tokens[i+1]
+				i++
+			}
+		case "-meta":
+			if i+1 < len(tokens) {
+				opts.MetadataTitle = tokens[i+1]
+				i++
+			}
+		case "-ff":
+			if i+1 < len(tokens) {
+				opts.FFmpegArgs = tokens[i+1]
+				i++
+			}
+		case "-tl":
+			if i+1 < len(tokens) {
+				opts.TrimLength = tokens[i+1]
+				i++
+			}
+		case "-rcf":
+			if i+1 < len(tokens) {
+				opts.RcloneFlags = tokens[i+1]
+				i++
+			}
+		case "-seedr":
+			if i+1 < len(tokens) {
+				opts.SeedrToken = tokens[i+1]
 				i++
 			}
 		case "-h":

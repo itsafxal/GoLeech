@@ -85,6 +85,58 @@ func (u *RcloneUploader) Upload(ctx context.Context, t *task.Task, filePath stri
 	}, nil
 }
 
+// Clone performs direct cloud-to-cloud transfers between remotes without local disk usage
+func (u *RcloneUploader) Clone(ctx context.Context, t *task.Task, src, dst string, onProgress downloader.ProgressCallback) (*UploadResult, error) {
+	cfg := config.Get()
+	args := []string{
+		"copy",
+		src,
+		dst,
+		"--progress",
+		"--stats", "1s",
+	}
+
+	if cfg.RcloneFlags != "" {
+		extra := strings.Fields(cfg.RcloneFlags)
+		args = append(args, extra...)
+	}
+
+	cmd := exec.CommandContext(ctx, "rclone", args...)
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to pipe rclone stderr: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start rclone: %w (ensure rclone binary is installed)", err)
+	}
+
+	scanner := bufio.NewScanner(stderr)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if m := rcloneProgressRe.FindStringSubmatch(line); len(m) > 4 {
+			curBytes := parseRcloneBytes(m[1])
+			totBytes := parseRcloneBytes(m[2])
+			spdBytes := parseRcloneBytes(strings.TrimSuffix(m[4], "/s"))
+
+			if onProgress != nil {
+				onProgress(curBytes, totBytes, float64(spdBytes))
+			}
+		}
+	}
+
+	if err := cmd.Wait(); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("rclone clone error: %w", err)
+	}
+
+	return &UploadResult{
+		URL: dst,
+	}, nil
+}
+
 func parseRcloneBytes(s string) int64 {
 	parts := strings.Fields(strings.ToUpper(s))
 	if len(parts) < 2 {

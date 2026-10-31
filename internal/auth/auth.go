@@ -8,11 +8,20 @@ import (
 type Role string
 
 const (
-	RoleOwner      Role = "owner"
-	RoleSudo       Role = "sudo"
-	RoleAuthorized Role = "authorized"
-	RoleGuest      Role = "guest"
+	RoleOwner       Role = "owner"
+	RoleSudo        Role = "sudo"
+	RoleAuthorized  Role = "authorized"
+	RoleBlacklisted Role = "blacklisted"
+	RoleGuest       Role = "guest"
 )
+
+// IsBlacklisted checks if user or chat is blacklisted
+func IsBlacklisted(id int64) bool {
+	if db.GlobalStore != nil && db.GlobalStore.IsBlacklisted(id) {
+		return true
+	}
+	return false
+}
 
 // IsOwner checks if user ID matches configured owner
 func IsOwner(userID int64) bool {
@@ -22,6 +31,9 @@ func IsOwner(userID int64) bool {
 
 // IsSudo checks if user is owner or listed as sudo in config or db
 func IsSudo(userID int64) bool {
+	if IsBlacklisted(userID) {
+		return false
+	}
 	if IsOwner(userID) {
 		return true
 	}
@@ -39,6 +51,9 @@ func IsSudo(userID int64) bool {
 
 // IsAuthorized checks if user or chat has permission to execute tasks
 func IsAuthorized(userID, chatID int64) bool {
+	if IsBlacklisted(userID) || IsBlacklisted(chatID) {
+		return false
+	}
 	if IsSudo(userID) {
 		return true
 	}
@@ -54,8 +69,16 @@ func IsAuthorized(userID, chatID int64) bool {
 	return false
 }
 
+// CanExecute checks if user or chat is allowed to execute tasks
+func CanExecute(userID, chatID int64) bool {
+	return IsAuthorized(userID, chatID)
+}
+
 // GetUserRole returns the highest role of a user
 func GetUserRole(userID, chatID int64) Role {
+	if IsBlacklisted(userID) || IsBlacklisted(chatID) {
+		return RoleBlacklisted
+	}
 	if IsOwner(userID) {
 		return RoleOwner
 	}

@@ -21,3 +21,4 @@ func TestPluginRegistrationNoDeadlock(t *testing.T) {
 		t.Errorf("Expected 1 command registered by plugin, got %d", len(reg.commands))
 	}
 }
+

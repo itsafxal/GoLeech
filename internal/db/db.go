@@ -21,6 +21,15 @@ type UserSettings struct {
 	UploadDest string `json:"upload_dest"`
 }
 
+type UserRecord struct {
+	ID            int64     `json:"id"`
+	Username      string    `json:"username"`
+	IsSudo        bool      `json:"is_sudo"`
+	IsAuth        bool      `json:"is_auth"`
+	IsBlacklisted bool      `json:"is_blacklisted"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 type TaskRecord struct {
 	GID       string    `json:"gid"`
 	UserID    int64     `json:"user_id"`
@@ -67,6 +76,7 @@ func InitDB(dbPath string) (*Store, error) {
 		username TEXT,
 		is_sudo INTEGER DEFAULT 0,
 		is_auth INTEGER DEFAULT 0,
+		is_blacklisted INTEGER DEFAULT 0,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
 
@@ -121,6 +131,9 @@ func InitDB(dbPath string) (*Store, error) {
 	if _, err := conn.Exec(schema); err != nil {
 		return nil, fmt.Errorf("failed to execute migrations: %w", err)
 	}
+
+	// Safe column migration for existing databases
+	_, _ = conn.Exec("ALTER TABLE users ADD COLUMN is_blacklisted INTEGER DEFAULT 0;")
 
 	store := &Store{db: conn}
 	GlobalStore = store
@@ -184,6 +197,83 @@ func (s *Store) UnauthorizeChat(chatID int64) error {
 	defer s.mu.Unlock()
 	_, err := s.db.Exec("UPDATE users SET is_auth = 0 WHERE id = ?", chatID)
 	return err
+}
+
+func (s *Store) IsBlacklisted(id int64) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var bl int
+	err := s.db.QueryRow("SELECT is_blacklisted FROM users WHERE id = ?", id).Scan(&bl)
+	return err == nil && bl == 1
+}
+
+func (s *Store) Blacklist(id int64, username string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`
+		INSERT INTO users (id, username, is_blacklisted, is_auth, is_sudo) VALUES (?, ?, 1, 0, 0)
+		ON CONFLICT(id) DO UPDATE SET is_blacklisted = 1, is_auth = 0, is_sudo = 0, username = excluded.username
+	`, id, username)
+	return err
+}
+
+func (s *Store) RemoveBlacklist(id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec("UPDATE users SET is_blacklisted = 0 WHERE id = ?", id)
+	return err
+}
+
+func (s *Store) GetUserStats() (totalUsers, totalSudos, totalAuth, totalBlacklisted int64, err error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&totalUsers)
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM users WHERE is_sudo = 1").Scan(&totalSudos)
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM users WHERE is_auth = 1").Scan(&totalAuth)
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM users WHERE is_blacklisted = 1").Scan(&totalBlacklisted)
+	return
+}
+
+func (s *Store) GetAllUsers() ([]*UserRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query("SELECT id, username, is_sudo, is_auth, is_blacklisted, created_at FROM users ORDER BY created_at DESC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []*UserRecord
+	for rows.Next() {
+		var u UserRecord
+		var sudo, auth, bl int
+		if err := rows.Scan(&u.ID, &u.Username, &sudo, &auth, &bl, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		u.IsSudo = (sudo == 1)
+		u.IsAuth = (auth == 1)
+		u.IsBlacklisted = (bl == 1)
+		list = append(list, &u)
+	}
+	return list, nil
+}
+
+func (s *Store) SetBotSetting(key, val string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`
+		INSERT INTO bot_settings (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`, key, val)
+	return err
+}
+
+func (s *Store) GetBotSetting(key string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var val string
+	err := s.db.QueryRow("SELECT value FROM bot_settings WHERE key = ?", key).Scan(&val)
+	return val, err
 }
 
 func (s *Store) GetUserSettings(userID int64) (*UserSettings, error) {

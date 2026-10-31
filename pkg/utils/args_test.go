@@ -33,4 +33,42 @@ func TestParseTaskOptions(t *testing.T) {
 	if opts.SplitSize != expectedSplit {
 		t.Errorf("expected SplitSize %d, got %d", expectedSplit, opts.SplitSize)
 	}
+
+	// Extended flags test
+	extendedInput := `magnet:?xt=urn:btih:xyz -m "Movies/2026" -ca mp3 -cv mp4 -ns "old:new" -meta "GoLeech Release" -ff "-preset fast" -tl 00:10:00 -d -j -ad -rcf "--transfers 8"`
+	extOpts := ParseTaskOptions(extendedInput)
+
+	if extOpts.Subfolder != "Movies/2026" {
+		t.Errorf("expected Subfolder 'Movies/2026', got '%s'", extOpts.Subfolder)
+	}
+	if extOpts.ConvertAudio != "mp3" {
+		t.Errorf("expected ConvertAudio 'mp3', got '%s'", extOpts.ConvertAudio)
+	}
+	if extOpts.ConvertVideo != "mp4" {
+		t.Errorf("expected ConvertVideo 'mp4', got '%s'", extOpts.ConvertVideo)
+	}
+	if extOpts.NameSwap != "old:new" {
+		t.Errorf("expected NameSwap 'old:new', got '%s'", extOpts.NameSwap)
+	}
+	if extOpts.MetadataTitle != "GoLeech Release" {
+		t.Errorf("expected MetadataTitle 'GoLeech Release', got '%s'", extOpts.MetadataTitle)
+	}
+	if extOpts.FFmpegArgs != "-preset fast" {
+		t.Errorf("expected FFmpegArgs '-preset fast', got '%s'", extOpts.FFmpegArgs)
+	}
+	if extOpts.TrimLength != "00:10:00" {
+		t.Errorf("expected TrimLength '00:10:00', got '%s'", extOpts.TrimLength)
+	}
+	if !extOpts.DownloadOnly {
+		t.Errorf("expected DownloadOnly true")
+	}
+	if !extOpts.JoinParts {
+		t.Errorf("expected JoinParts true")
+	}
+	if !extOpts.AudioOnly {
+		t.Errorf("expected AudioOnly true")
+	}
+	if extOpts.RcloneFlags != "--transfers 8" {
+		t.Errorf("expected RcloneFlags '--transfers 8', got '%s'", extOpts.RcloneFlags)
+	}
 }
