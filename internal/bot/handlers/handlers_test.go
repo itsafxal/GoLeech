@@ -3,6 +3,8 @@ package handlers
 import (
 	"strings"
 	"testing"
+
+	"github.com/GoLeech/GoLeech/pkg/typography"
 )
 
 func TestGetHelpContent(t *testing.T) {
@@ -31,8 +33,9 @@ func TestRenderUserSettings(t *testing.T) {
 
 func TestRenderBotSettings(t *testing.T) {
 	text, markup := RenderBotSettings()
-	if !strings.Contains(text, "System Control Dashboard") {
-		t.Errorf("expected 'System Control Dashboard' in text, got: %s", text)
+	expected := typography.ToSmallCapsHTML("System Control Dashboard")
+	if !strings.Contains(text, expected) {
+		t.Errorf("expected '%s' in text, got: %s", expected, text)
 	}
 	if markup == nil {
 		t.Errorf("expected non-nil markup")
@@ -41,11 +44,13 @@ func TestRenderBotSettings(t *testing.T) {
 
 func TestGetStatsMessage(t *testing.T) {
 	stats := GetStatsMessage()
-	if !strings.Contains(stats, "System & Architecture Statistics") {
-		t.Errorf("expected header in stats message, got: %s", stats)
+	expectedHeader := typography.ToSmallCapsHTML("System & Architecture Statistics")
+	if !strings.Contains(stats, expectedHeader) {
+		t.Errorf("expected header '%s' in stats message, got: %s", expectedHeader, stats)
 	}
-	if !strings.Contains(stats, "Gogram") {
-		t.Errorf("expected Gogram in stats message, got: %s", stats)
+	expectedFramework := typography.ToSmallCapsHTML("Gogram")
+	if !strings.Contains(stats, expectedFramework) {
+		t.Errorf("expected '%s' in stats message, got: %s", expectedFramework, stats)
 	}
 }
 

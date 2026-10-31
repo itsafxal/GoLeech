@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/GoLeech/GoLeech/internal/auth"
+	"github.com/GoLeech/GoLeech/internal/bot/ui"
 	"github.com/GoLeech/GoLeech/internal/config"
 	"github.com/GoLeech/GoLeech/internal/db"
 	"github.com/GoLeech/GoLeech/internal/downloader"
@@ -34,17 +35,17 @@ func processTask(m *tg.NewMessage, tType task.TaskType, botClient, userClient *t
 	chatID := m.ChatID()
 
 	if !auth.IsAuthorized(senderID, chatID) {
-		_, err := m.Reply("⚠️ <b>Unauthorized:</b> You do not have permission to execute this command.", &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, "⚠️ <b>Unauthorized:</b> You do not have permission to execute this command.")
 		return err
 	}
 
 	cfg := config.Get()
 	if tType == task.TypeLeech && cfg.DisableLeech {
-		_, err := m.Reply("⚠️ Leech functionality is currently disabled.", &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, "⚠️ Leech functionality is currently disabled.")
 		return err
 	}
 	if tType == task.TypeMirror && cfg.DisableMirror {
-		_, err := m.Reply("⚠️ Mirror functionality is currently disabled.", &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, "⚠️ Mirror functionality is currently disabled.")
 		return err
 	}
 
@@ -82,7 +83,7 @@ func processTask(m *tg.NewMessage, tType task.TaskType, botClient, userClient *t
 	}
 
 	if opts.Link == "" {
-		_, err := m.Reply(fmt.Sprintf("⚠️ <b>Usage:</b> <code>/%s [link/flags]</code> or reply to a link/file.", strings.ToLower(string(tType))), &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, fmt.Sprintf("⚠️ <b>Usage:</b> <code>/%s [link/flags]</code> or reply to a link/file.", strings.ToLower(string(tType))))
 		return err
 	}
 
@@ -96,11 +97,10 @@ func processTask(m *tg.NewMessage, tType task.TaskType, botClient, userClient *t
 	task.GlobalManager.AddTask(t)
 
 	// Send initial confirmation
-	notifyMsg, err := m.Reply(fmt.Sprintf("⏳ <b>Task Added to Queue:</b>\n┠ <b>GID:</b> <code>%s</code>\n┠ <b>Type:</b> <i>%s</i>\n┖ <b>Name:</b> <code>%s</code>", t.GID, t.Type, t.Name), &tg.SendOptions{
-		ParseMode: "html",
-		ReplyMarkup: tg.Button.Keyboard(
-			tg.Button.Row(
-				tg.Button.Data("🚫 Cancel Task", fmt.Sprintf("cancel:%s", t.GID)),
+	notifyMsg, err := ui.Reply(m, fmt.Sprintf("⏳ <b>Task Added to Queue:</b>\n┠ <b>GID:</b> <code>%s</code>\n┠ <b>Type:</b> <i>%s</i>\n┖ <b>Name:</b> <code><raw>%s</raw></code>", t.GID, t.Type, t.Name), &tg.SendOptions{
+		ReplyMarkup: ui.Button.Keyboard(
+			ui.Button.Row(
+				ui.Button.Data("🚫 Cancel Task", fmt.Sprintf("cancel:%s", t.GID)),
 			),
 		),
 	})
@@ -125,7 +125,7 @@ func runTaskPipeline(t *task.Task, origMsg, replyMsg *tg.NewMessage, botClient, 
 	// 1. Acquire Download Slot
 	if err := task.GlobalManager.AcquireDownloadSlot(t); err != nil {
 		t.SetError(err)
-		_, _ = origMsg.Reply(fmt.Sprintf("❌ Task <code>%s</code> failed to start: %v", t.GID, err), &tg.SendOptions{ParseMode: "html"})
+		_, _ = ui.Reply(origMsg, fmt.Sprintf("❌ Task <code>%s</code> failed to start: <raw>%v</raw>", t.GID, err))
 		return
 	}
 	defer task.GlobalManager.ReleaseDownloadSlot()
@@ -166,7 +166,7 @@ func runTaskPipeline(t *task.Task, origMsg, replyMsg *tg.NewMessage, botClient, 
 
 	if dlErr != nil {
 		t.SetError(dlErr)
-		_, _ = origMsg.Reply(fmt.Sprintf("❌ Download failed for <code>%s</code>:\n<code>%v</code>", t.Name, dlErr), &tg.SendOptions{ParseMode: "html"})
+		_, _ = ui.Reply(origMsg, fmt.Sprintf("❌ Download failed for <code><raw>%s</raw></code>:\n<code><raw>%v</raw></code>", t.Name, dlErr))
 		return
 	}
 
@@ -272,7 +272,7 @@ func runTaskPipeline(t *task.Task, origMsg, replyMsg *tg.NewMessage, botClient, 
 
 	if upErr != nil {
 		t.SetError(upErr)
-		_, _ = origMsg.Reply(fmt.Sprintf("❌ Upload failed for <code>%s</code>:\n<code>%v</code>", t.Name, upErr), &tg.SendOptions{ParseMode: "html"})
+		_, _ = ui.Reply(origMsg, fmt.Sprintf("❌ Upload failed for <code><raw>%s</raw></code>:\n<code><raw>%v</raw></code>", t.Name, upErr))
 		return
 	}
 
@@ -282,15 +282,15 @@ func runTaskPipeline(t *task.Task, origMsg, replyMsg *tg.NewMessage, botClient, 
 	elapsed := time.Since(t.StartTime)
 	completeText := fmt.Sprintf(`✅ <b>Task Completed!</b>
 │
-┠ <b>Name:</b> <code>%s</code>
+┠ <b>Name:</b> <code><raw>%s</raw></code>
 ┠ <b>Size:</b> <i>%s</i>
 ┠ <b>Type:</b> <i>%s</i>
 ┠ <b>Engine:</b> <i>%s</i>
 ┖ <b>Elapsed:</b> <i>%s</i>`, t.Name, utils.FormatBytes(t.TotalSize), t.Type, t.Engine, utils.FormatDuration(elapsed))
 
 	if uploadRes != nil && uploadRes.URL != "" {
-		completeText += fmt.Sprintf("\n\n🔗 <b>Cloud Link:</b> %s", uploadRes.URL)
+		completeText += fmt.Sprintf("\n\n🔗 <b>Cloud Link:</b> <raw>%s</raw>", uploadRes.URL)
 	}
 
-	_, _ = origMsg.Reply(completeText, &tg.SendOptions{ParseMode: "html"})
+	_, _ = ui.Reply(origMsg, completeText)
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/GoLeech/GoLeech/internal/auth"
+	"github.com/GoLeech/GoLeech/internal/bot/ui"
 	"github.com/GoLeech/GoLeech/internal/task"
 	tg "github.com/amarnathcjd/gogram/telegram"
 )
@@ -25,18 +26,18 @@ func HandleCancel(m *tg.NewMessage) error {
 	}
 
 	if targetGID == "" {
-		_, err := m.Reply("⚠️ <b>Usage:</b> <code>/cancel &lt;GID&gt;</code> or <code>/c_&lt;GID&gt;</code>", &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, "⚠️ <b>Usage:</b> <code>/cancel &lt;GID&gt;</code> or <code>/c_&lt;GID&gt;</code>")
 		return err
 	}
 
 	isSudo := auth.IsSudo(senderID)
 	success, msg := task.GlobalManager.CancelTask(targetGID, senderID, isSudo)
 	if !success {
-		_, err := m.Reply("❌ "+msg, &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, "❌ "+msg)
 		return err
 	}
 
-	_, err := m.Reply("✅ "+msg, &tg.SendOptions{ParseMode: "html"})
+	_, err := ui.Reply(m, "✅ "+msg)
 	return err
 }
 
@@ -50,6 +51,6 @@ func HandleCancelAll(m *tg.NewMessage) error {
 	isSudo := auth.IsSudo(senderID)
 	cancelledCount := task.GlobalManager.CancelAll(filter, senderID, isSudo)
 
-	_, err := m.Reply(fmt.Sprintf("🛑 Cancelled <b>%d</b> tasks (filter: <i>%s</i>).", cancelledCount, filter), &tg.SendOptions{ParseMode: "html"})
+	_, err := ui.Reply(m, fmt.Sprintf("🛑 Cancelled <b>%d</b> tasks (filter: <i>%s</i>).", cancelledCount, filter))
 	return err
 }

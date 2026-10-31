@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/GoLeech/GoLeech/internal/auth"
+	"github.com/GoLeech/GoLeech/internal/bot/ui"
 	"github.com/GoLeech/GoLeech/internal/db"
 	"github.com/GoLeech/GoLeech/internal/plugin"
 	"github.com/GoLeech/GoLeech/internal/task"
+	"github.com/GoLeech/GoLeech/pkg/typography"
 	"github.com/GoLeech/GoLeech/pkg/utils"
 	tg "github.com/amarnathcjd/gogram/telegram"
 )
@@ -21,13 +23,13 @@ import (
 // HandlePing measures round-trip latency
 func HandlePing(m *tg.NewMessage) error {
 	start := time.Now()
-	reply, err := m.Reply("🏓 <i>Pinging Telegram MTProto servers...</i>", &tg.SendOptions{ParseMode: "html"})
+	reply, err := m.Reply(typography.ToSmallCapsHTML("🏓 <i>Pinging Telegram MTProto servers...</i>"), &tg.SendOptions{ParseMode: "html"})
 	if err != nil {
 		log.Printf("⚠️ Error replying to /ping: %v", err)
 		return err
 	}
 	latency := time.Since(start).Milliseconds()
-	_, err = reply.Edit(fmt.Sprintf("🏓 <b>Pong!</b> Response Latency: <code>%d ms</code>", latency), &tg.SendOptions{ParseMode: "html"})
+	_, err = reply.Edit(typography.ToSmallCapsHTML(fmt.Sprintf("🏓 <b>Pong!</b> Response Latency: <code>%d ms</code>", latency)), &tg.SendOptions{ParseMode: "html"})
 	if err != nil {
 		log.Printf("⚠️ Error editing /ping reply: %v", err)
 	}
@@ -43,7 +45,7 @@ func GetStatsMessage() string {
 	activeCount := len(tasks)
 	uptime := utils.FormatDuration(time.Since(botStartTime))
 
-	return fmt.Sprintf(`⌬ <b><u>GoLeech — System & Architecture Statistics</u></b>
+	rawText := fmt.Sprintf(`⌬ <b><u>GoLeech — System & Architecture Statistics</u></b>
 │
 ┠ <b>Memory Allocated:</b> <code>%d MB</code>
 ┠ <b>Total System Memory:</b> <code>%d MB</code>
@@ -61,6 +63,7 @@ func GetStatsMessage() string {
 		uptime,
 		runtime.Version(),
 	)
+	return typography.ToSmallCapsHTML(rawText)
 }
 
 // HandleStats responds with detailed system memory and task statistics
@@ -68,11 +71,11 @@ func HandleStats(m *tg.NewMessage) error {
 	text := GetStatsMessage()
 	_, err := m.Reply(text, &tg.SendOptions{
 		ParseMode: "html",
-		ReplyMarkup: tg.Button.Keyboard(
+		ReplyMarkup: typography.FormatMarkup(tg.Button.Keyboard(
 			tg.Button.Row(
 				tg.Button.Data("♻️ Refresh Stats", "stats:view"),
 			),
-		),
+		)),
 	})
 	return err
 }
@@ -80,7 +83,7 @@ func HandleStats(m *tg.NewMessage) error {
 // HandleAuthorize authorizes a group chat or user ID
 func HandleAuthorize(m *tg.NewMessage) error {
 	if !auth.IsSudo(m.SenderID()) {
-		_, err := m.Reply("⛔️ Only Sudo administrators can authorize chats.", &tg.SendOptions{})
+		_, err := ui.Reply(m, "⛔️ Only Sudo administrators can authorize chats.")
 		return err
 	}
 
@@ -94,19 +97,19 @@ func HandleAuthorize(m *tg.NewMessage) error {
 
 	if db.GlobalStore != nil {
 		if err := db.GlobalStore.AuthorizeChat(targetID); err != nil {
-			_, err = m.Reply("❌ Failed to authorize: "+err.Error(), &tg.SendOptions{})
+			_, err = ui.Reply(m, "❌ Failed to authorize: "+err.Error())
 			return err
 		}
 	}
 
-	_, err := m.Reply(fmt.Sprintf("✅ <b>Authorized:</b> Chat/User <code>%d</code> has been granted access.", targetID), &tg.SendOptions{ParseMode: "html"})
+	_, err := ui.Reply(m, fmt.Sprintf("✅ <b>Authorized:</b> Chat/User <code>%d</code> has been granted access.", targetID))
 	return err
 }
 
 // HandleUnauthorize revokes authorization from a group chat or user ID
 func HandleUnauthorize(m *tg.NewMessage) error {
 	if !auth.IsSudo(m.SenderID()) {
-		_, err := m.Reply("⛔️ Only Sudo administrators can unauthorize chats.", &tg.SendOptions{})
+		_, err := ui.Reply(m, "⛔️ Only Sudo administrators can unauthorize chats.")
 		return err
 	}
 
@@ -120,91 +123,91 @@ func HandleUnauthorize(m *tg.NewMessage) error {
 
 	if db.GlobalStore != nil {
 		if err := db.GlobalStore.UnauthorizeChat(targetID); err != nil {
-			_, err = m.Reply("❌ Failed to unauthorize: "+err.Error(), &tg.SendOptions{})
+			_, err = ui.Reply(m, "❌ Failed to unauthorize: "+err.Error())
 			return err
 		}
 	}
 
-	_, err := m.Reply(fmt.Sprintf("🚫 <b>Unauthorized:</b> Access revoked for Chat/User <code>%d</code>.", targetID), &tg.SendOptions{ParseMode: "html"})
+	_, err := ui.Reply(m, fmt.Sprintf("🚫 <b>Unauthorized:</b> Access revoked for Chat/User <code>%d</code>.", targetID))
 	return err
 }
 
 // HandleAddSudo grants Sudo admin privileges to a user
 func HandleAddSudo(m *tg.NewMessage) error {
 	if !auth.IsOwner(m.SenderID()) {
-		_, err := m.Reply("⛔️ Only the bot Owner can appoint Sudo users.", &tg.SendOptions{})
+		_, err := ui.Reply(m, "⛔️ Only the bot Owner can appoint Sudo users.")
 		return err
 	}
 
 	args := strings.Fields(m.Args())
 	if len(args) == 0 {
-		_, err := m.Reply("⚠️ <b>Usage:</b> <code>/addsudo &lt;user_id&gt;</code>", &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, "⚠️ <b>Usage:</b> <code>/addsudo &lt;user_id&gt;</code>")
 		return err
 	}
 
 	targetID, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
-		_, err = m.Reply("❌ Invalid User ID.", &tg.SendOptions{})
+		_, err = ui.Reply(m, "❌ Invalid User ID.")
 		return err
 	}
 
 	if db.GlobalStore != nil {
 		if err := db.GlobalStore.AddSudo(targetID, ""); err != nil {
-			_, err = m.Reply("❌ Failed to add sudo: "+err.Error(), &tg.SendOptions{})
+			_, err = ui.Reply(m, "❌ Failed to add sudo: "+err.Error())
 			return err
 		}
 	}
 
-	_, err = m.Reply(fmt.Sprintf("👑 <b>Sudo Granted:</b> User <code>%d</code> is now a Sudo Administrator.", targetID), &tg.SendOptions{ParseMode: "html"})
+	_, err = ui.Reply(m, fmt.Sprintf("👑 <b>Sudo Granted:</b> User <code>%d</code> is now a Sudo Administrator.", targetID))
 	return err
 }
 
 // HandleRemoveSudo revokes Sudo privileges from a user
 func HandleRemoveSudo(m *tg.NewMessage) error {
 	if !auth.IsOwner(m.SenderID()) {
-		_, err := m.Reply("⛔️ Only the bot Owner can revoke Sudo users.", &tg.SendOptions{})
+		_, err := ui.Reply(m, "⛔️ Only the bot Owner can revoke Sudo users.")
 		return err
 	}
 
 	args := strings.Fields(m.Args())
 	if len(args) == 0 {
-		_, err := m.Reply("⚠️ <b>Usage:</b> <code>/rmsudo &lt;user_id&gt;</code>", &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, "⚠️ <b>Usage:</b> <code>/rmsudo &lt;user_id&gt;</code>")
 		return err
 	}
 
 	targetID, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
-		_, err = m.Reply("❌ Invalid User ID.", &tg.SendOptions{})
+		_, err = ui.Reply(m, "❌ Invalid User ID.")
 		return err
 	}
 
 	if db.GlobalStore != nil {
 		if err := db.GlobalStore.RemoveSudo(targetID); err != nil {
-			_, err = m.Reply("❌ Failed to remove sudo: "+err.Error(), &tg.SendOptions{})
+			_, err = ui.Reply(m, "❌ Failed to remove sudo: "+err.Error())
 			return err
 		}
 	}
 
-	_, err = m.Reply(fmt.Sprintf("🔻 <b>Sudo Revoked:</b> User <code>%d</code> is no longer a Sudo Administrator.", targetID), &tg.SendOptions{ParseMode: "html"})
+	_, err = ui.Reply(m, fmt.Sprintf("🔻 <b>Sudo Revoked:</b> User <code>%d</code> is no longer a Sudo Administrator.", targetID))
 	return err
 }
 
 // HandleBlacklist bans a user or chat ID from using any bot feature
 func HandleBlacklist(m *tg.NewMessage) error {
 	if !auth.IsSudo(m.SenderID()) {
-		_, err := m.Reply("⛔️ Only Sudo administrators can blacklist users.", &tg.SendOptions{})
+		_, err := ui.Reply(m, "⛔️ Only Sudo administrators can blacklist users.")
 		return err
 	}
 
 	args := strings.Fields(m.Args())
 	if len(args) == 0 {
-		_, err := m.Reply("⚠️ <b>Usage:</b> <code>/blacklist &lt;id&gt; [username]</code>", &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, "⚠️ <b>Usage:</b> <code>/blacklist &lt;id&gt; [username]</code>")
 		return err
 	}
 
 	targetID, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
-		_, err = m.Reply("❌ Invalid User ID.", &tg.SendOptions{})
+		_, err = ui.Reply(m, "❌ Invalid User ID.")
 		return err
 	}
 
@@ -215,60 +218,60 @@ func HandleBlacklist(m *tg.NewMessage) error {
 
 	if db.GlobalStore != nil {
 		if err := db.GlobalStore.Blacklist(targetID, username); err != nil {
-			_, err = m.Reply("❌ Failed to blacklist: "+err.Error(), &tg.SendOptions{})
+			_, err = ui.Reply(m, "❌ Failed to blacklist: "+err.Error())
 			return err
 		}
 	}
 
-	_, err = m.Reply(fmt.Sprintf("⛔️ <b>Blacklisted:</b> ID <code>%d</code> has been banned from all bot operations.", targetID), &tg.SendOptions{ParseMode: "html"})
+	_, err = ui.Reply(m, fmt.Sprintf("⛔️ <b>Blacklisted:</b> ID <code>%d</code> has been banned from all bot operations.", targetID))
 	return err
 }
 
 // HandleRemoveBlacklist unbans a user or chat ID
 func HandleRemoveBlacklist(m *tg.NewMessage) error {
 	if !auth.IsSudo(m.SenderID()) {
-		_, err := m.Reply("⛔️ Only Sudo administrators can manage the blacklist.", &tg.SendOptions{})
+		_, err := ui.Reply(m, "⛔️ Only Sudo administrators can manage the blacklist.")
 		return err
 	}
 
 	args := strings.Fields(m.Args())
 	if len(args) == 0 {
-		_, err := m.Reply("⚠️ <b>Usage:</b> <code>/rmblacklist &lt;id&gt;</code>", &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, "⚠️ <b>Usage:</b> <code>/rmblacklist &lt;id&gt;</code>")
 		return err
 	}
 
 	targetID, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
-		_, err = m.Reply("❌ Invalid User ID.", &tg.SendOptions{})
+		_, err = ui.Reply(m, "❌ Invalid User ID.")
 		return err
 	}
 
 	if db.GlobalStore != nil {
 		if err := db.GlobalStore.RemoveBlacklist(targetID); err != nil {
-			_, err = m.Reply("❌ Failed to remove from blacklist: "+err.Error(), &tg.SendOptions{})
+			_, err = ui.Reply(m, "❌ Failed to remove from blacklist: "+err.Error())
 			return err
 		}
 	}
 
-	_, err = m.Reply(fmt.Sprintf("✅ <b>Unbanned:</b> ID <code>%d</code> has been removed from the blacklist.", targetID), &tg.SendOptions{ParseMode: "html"})
+	_, err = ui.Reply(m, fmt.Sprintf("✅ <b>Unbanned:</b> ID <code>%d</code> has been removed from the blacklist.", targetID))
 	return err
 }
 
 // HandleUsers displays registered user metrics and database statistics
 func HandleUsers(m *tg.NewMessage) error {
 	if !auth.IsSudo(m.SenderID()) {
-		_, err := m.Reply("⛔️ Only Sudo administrators can view user metrics.", &tg.SendOptions{})
+		_, err := ui.Reply(m, "⛔️ Only Sudo administrators can view user metrics.")
 		return err
 	}
 
 	if db.GlobalStore == nil {
-		_, err := m.Reply("Database connection unavailable.", &tg.SendOptions{})
+		_, err := ui.Reply(m, "Database connection unavailable.")
 		return err
 	}
 
 	total, sudo, authorized, blacklisted, err := db.GlobalStore.GetUserStats()
 	if err != nil {
-		_, err = m.Reply("❌ Failed to retrieve user statistics: "+err.Error(), &tg.SendOptions{})
+		_, err = ui.Reply(m, "❌ Failed to retrieve user statistics: "+err.Error())
 		return err
 	}
 
@@ -282,7 +285,7 @@ func HandleUsers(m *tg.NewMessage) error {
 ┖ <i>Database Mode: SQLite WAL Mode High Concurrency</i>`,
 		total, sudo, authorized, blacklisted)
 
-	_, err = m.Reply(text, &tg.SendOptions{ParseMode: "html"})
+	_, err = ui.Reply(m, text)
 	return err
 }
 
@@ -300,22 +303,22 @@ func HandleBroadcast(m *tg.NewMessage, botClient *tg.Client) error {
 		msg := `⚠️ <b>Broadcast Usage:</b>
 ┃ ┠ Send: <code>/broadcast &lt;message&gt;</code>
 ┃ ┖ Or reply to any message/media with: <code>/broadcast</code>`
-		_, err := m.Reply(msg, &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, msg)
 		return err
 	}
 
 	if db.GlobalStore == nil {
-		_, err := m.Reply("Database unavailable.", &tg.SendOptions{})
+		_, err := ui.Reply(m, "Database unavailable.")
 		return err
 	}
 
 	users, err := db.GlobalStore.GetAllUsers()
 	if err != nil || len(users) == 0 {
-		_, err = m.Reply("No registered users found to broadcast to.", &tg.SendOptions{})
+		_, err = ui.Reply(m, "No registered users found to broadcast to.")
 		return err
 	}
 
-	progressMsg, _ := m.Reply(fmt.Sprintf("🚀 <b>Broadcasting to %d users...</b> Please wait.", len(users)), &tg.SendOptions{ParseMode: "html"})
+	progressMsg, _ := ui.Reply(m, fmt.Sprintf("🚀 <b>Broadcasting to %d users...</b> Please wait.", len(users)))
 
 	go func() {
 		start := time.Now()
@@ -334,6 +337,7 @@ func HandleBroadcast(m *tg.NewMessage, botClient *tg.Client) error {
 					_, sendErr = replyMsg.ForwardTo(u.ID)
 				}
 			} else {
+				// Broadcast text is user-submitted, preserve verbatim
 				_, sendErr = botClient.SendMessage(u.ID, broadcastText, &tg.SendOptions{ParseMode: "html"})
 			}
 
@@ -358,7 +362,7 @@ func HandleBroadcast(m *tg.NewMessage, botClient *tg.Client) error {
 ┖ <i>Broadcast ID:</i> <code>bc_%d</code>`, len(users), sentCount, failCount, duration, time.Now().Unix())
 
 		if progressMsg != nil {
-			_, _ = progressMsg.Edit(summary, &tg.SendOptions{ParseMode: "html"})
+			_, _ = ui.EditMsg(progressMsg, summary)
 		}
 	}()
 
@@ -368,7 +372,7 @@ func HandleBroadcast(m *tg.NewMessage, botClient *tg.Client) error {
 // HandleLog displays recent logs in an expandable block or provides file upload
 func HandleLog(m *tg.NewMessage, botClient *tg.Client) error {
 	if !auth.IsSudo(m.SenderID()) {
-		_, err := m.Reply("⛔️ Only Sudo administrators can view logs.", &tg.SendOptions{})
+		_, err := ui.Reply(m, "⛔️ Only Sudo administrators can view logs.")
 		return err
 	}
 
@@ -387,7 +391,7 @@ func HandleLog(m *tg.NewMessage, botClient *tg.Client) error {
 [INFO] MTProto update stream active
 [INFO] All systems operational</blockquote>`, utils.FormatDuration(time.Since(botStartTime)), runtime.NumGoroutine())
 
-		_, err = m.Reply(text, &tg.SendOptions{ParseMode: "html"})
+		_, err = ui.Reply(m, text)
 		return err
 	}
 
@@ -398,15 +402,15 @@ func HandleLog(m *tg.NewMessage, botClient *tg.Client) error {
 	}
 	recent := strings.Join(lines[startLine:], "\n")
 
+	// Raw log content wrapped in <raw> to preserve verbatim
 	text := fmt.Sprintf(`⌬ <b><u>GoLeech — System Log (Last %d lines)</u></b>
 │
-<blockquote expandable>%s</blockquote>`, len(lines)-startLine, html.EscapeString(recent))
+<blockquote expandable><raw>%s</raw></blockquote>`, len(lines)-startLine, html.EscapeString(recent))
 
-	_, err = m.Reply(text, &tg.SendOptions{
-		ParseMode: "html",
-		ReplyMarkup: tg.Button.Keyboard(
-			tg.Button.Row(
-				tg.Button.Data("❌ Close", "help:close"),
+	_, err = ui.Reply(m, text, &tg.SendOptions{
+		ReplyMarkup: ui.Button.Keyboard(
+			ui.Button.Row(
+				ui.Button.Data("❌ Close", "help:close"),
 			),
 		),
 	})
@@ -416,7 +420,7 @@ func HandleLog(m *tg.NewMessage, botClient *tg.Client) error {
 // HandleRestart offers confirmation before gracefully restarting the bot instance
 func HandleRestart(m *tg.NewMessage) error {
 	if !auth.IsSudo(m.SenderID()) {
-		_, err := m.Reply("⛔️ Only Sudo administrators can restart the bot.", &tg.SendOptions{})
+		_, err := ui.Reply(m, "⛔️ Only Sudo administrators can restart the bot.")
 		return err
 	}
 
@@ -426,15 +430,14 @@ func HandleRestart(m *tg.NewMessage) error {
 ┠ Active transfers will be safely stopped and saved.
 ┖ The supervisor (Docker / systemd) will immediately launch a clean instance.`
 
-	markup := tg.Button.Keyboard(
-		tg.Button.Row(
-			tg.Button.Data("✅ Confirm Restart", "bot:restart_confirm"),
-			tg.Button.Data("❌ Cancel", "help:close"),
+	markup := ui.Button.Keyboard(
+		ui.Button.Row(
+			ui.Button.Data("✅ Confirm Restart", "bot:restart_confirm"),
+			ui.Button.Data("❌ Cancel", "help:close"),
 		),
 	)
 
-	_, err := m.Reply(text, &tg.SendOptions{
-		ParseMode:   "html",
+	_, err := ui.Reply(m, text, &tg.SendOptions{
 		ReplyMarkup: markup,
 	})
 	return err
@@ -467,11 +470,10 @@ func HandleMemory(m *tg.NewMessage) error {
 		runtime.NumCPU(),
 	)
 
-	_, err := m.Reply(text, &tg.SendOptions{
-		ParseMode: "html",
-		ReplyMarkup: tg.Button.Keyboard(
-			tg.Button.Row(
-				tg.Button.Data("❌ Close", "help:close"),
+	_, err := ui.Reply(m, text, &tg.SendOptions{
+		ReplyMarkup: ui.Button.Keyboard(
+			ui.Button.Row(
+				ui.Button.Data("❌ Close", "help:close"),
 			),
 		),
 	})
@@ -486,22 +488,21 @@ func HandlePlugins(m *tg.NewMessage) error {
 	}
 
 	if len(plugins) == 0 {
-		_, err := m.Reply("🧩 <b>Loaded Plugins:</b> <i>No external plugins currently loaded.</i>", &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, "🧩 <b>Loaded Plugins:</b> <i>No external plugins currently loaded.</i>")
 		return err
 	}
 
 	var sb strings.Builder
 	sb.WriteString("🧩 <b><u>Active GoLeech Plugins</u></b>\n│\n")
 	for i, p := range plugins {
-		sb.WriteString(fmt.Sprintf("┠ <b>%d. %s</b> (v%s)\n┃ ┖ <i>%s</i>\n", i+1, html.EscapeString(p.Name()), html.EscapeString(p.Version()), html.EscapeString(p.Description())))
+		sb.WriteString(fmt.Sprintf("┠ <b>%d. <raw>%s</raw></b> (v<raw>%s</raw>)\n┃ ┖ <i><raw>%s</raw></i>\n", i+1, html.EscapeString(p.Name()), html.EscapeString(p.Version()), html.EscapeString(p.Description())))
 	}
 	sb.WriteString("┖ <i>All plugins run concurrently in native Go goroutines.</i>")
 
-	_, err := m.Reply(sb.String(), &tg.SendOptions{
-		ParseMode: "html",
-		ReplyMarkup: tg.Button.Keyboard(
-			tg.Button.Row(
-				tg.Button.Data("❌ Close", "help:close"),
+	_, err := ui.Reply(m, sb.String(), &tg.SendOptions{
+		ReplyMarkup: ui.Button.Keyboard(
+			ui.Button.Row(
+				ui.Button.Data("❌ Close", "help:close"),
 			),
 		),
 	})

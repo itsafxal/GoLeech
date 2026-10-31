@@ -10,6 +10,7 @@ import (
 
 	"github.com/GoLeech/GoLeech/internal/config"
 	"github.com/GoLeech/GoLeech/internal/task"
+	"github.com/GoLeech/GoLeech/pkg/typography"
 	"github.com/GoLeech/GoLeech/pkg/utils"
 	tg "github.com/amarnathcjd/gogram/telegram"
 )
@@ -92,7 +93,8 @@ func GenerateStatusMessage(page int, filter string) (string, tg.ReplyMarkup) {
 	}
 
 	if len(filtered) == 0 {
-		return "<b>No Active Tasks!</b>\n\n" + getBotStatsFooter(), getControlButtons(1, 1, filter)
+		emptyMsg := typography.ToSmallCapsHTML("<b>No Active Tasks!</b>\n\n" + getBotStatsFooter())
+		return emptyMsg, typography.FormatMarkup(getControlButtons(1, 1, filter))
 	}
 
 	limit := cfg.StatusLimit
@@ -117,7 +119,7 @@ func GenerateStatusMessage(page int, filter string) (string, tg.ReplyMarkup) {
 	var sb strings.Builder
 	for i, t := range filtered[start:end] {
 		idx := start + i + 1
-		sb.WriteString(fmt.Sprintf("<b>%d.</b> <b><i>%s</i></b>\n", idx, html.EscapeString(t.Name)))
+		sb.WriteString(fmt.Sprintf("<b>%d.</b> <b><i><raw>%s</raw></i></b>\n", idx, html.EscapeString(t.Name)))
 		if t.UserName != "" {
 			sb.WriteString(fmt.Sprintf("<b>Task By:</b> @%s (<code>#ID%d</code>)\n", t.UserName, t.UserID))
 		}
@@ -135,7 +137,7 @@ func GenerateStatusMessage(page int, filter string) (string, tg.ReplyMarkup) {
 	sb.WriteString("⌬ <b><u>Bot Stats</u></b>\n")
 	sb.WriteString(getBotStatsFooter())
 
-	return sb.String(), getControlButtons(page, totalPages, filter)
+	return typography.ToSmallCapsHTML(sb.String()), typography.FormatMarkup(getControlButtons(page, totalPages, filter))
 }
 
 func getBotStatsFooter() string {

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/GoLeech/GoLeech/internal/auth"
+	"github.com/GoLeech/GoLeech/internal/bot/ui"
 	"github.com/GoLeech/GoLeech/internal/task"
 	tg "github.com/amarnathcjd/gogram/telegram"
 )
@@ -15,7 +16,7 @@ func HandleSelect(m *tg.NewMessage) error {
 	chatID := m.ChatID()
 
 	if !auth.CanExecute(senderID, chatID) {
-		_, err := m.Reply("⛔️ You are not authorized to execute tasks.", &tg.SendOptions{})
+		_, err := ui.Reply(m, "⛔️ You are not authorized to execute tasks.")
 		return err
 	}
 
@@ -44,18 +45,18 @@ func HandleSelect(m *tg.NewMessage) error {
 ┃ ┖ Or reply to an active torrent task with: <code>/select</code>
 ┃
 <i>💡 Tip: You can also pass <code>-s</code> directly when starting a task: <code>/leech &lt;magnet&gt; -s</code></i>`
-		_, err := m.Reply(usage, &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, usage)
 		return err
 	}
 
 	t := task.GlobalManager.GetTask(targetGID)
 	if t == nil {
-		_, err := m.Reply(fmt.Sprintf("❌ Task <code>%s</code> not found or already completed.", targetGID), &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, fmt.Sprintf("❌ Task <code>%s</code> not found or already completed.", targetGID))
 		return err
 	}
 
 	if !auth.IsSudo(senderID) && t.UserID != senderID {
-		_, err := m.Reply("⛔️ You do not have permission to manage this task.", &tg.SendOptions{})
+		_, err := ui.Reply(m, "⛔️ You do not have permission to manage this task.")
 		return err
 	}
 
@@ -66,11 +67,11 @@ func HandleSelect(m *tg.NewMessage) error {
 	msg := fmt.Sprintf(`📁 <b><u>Selective Downloading Activated</u></b>
 │
 ┠ <b>Task GID:</b> <code>%s</code>
-┠ <b>Target:</b> <b>%s</b>
+┠ <b>Target:</b> <b><raw>%s</raw></b>
 │
 ┖ <i>File selection filter is now active for this task. Unwanted files will be bypassed!</i>`, t.GID, t.Name)
 
-	_, err := m.Reply(msg, &tg.SendOptions{ParseMode: "html"})
+	_, err := ui.Reply(m, msg)
 	return err
 }
 

@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"github.com/GoLeech/GoLeech/internal/auth"
+	"github.com/GoLeech/GoLeech/internal/bot/ui"
 	"github.com/GoLeech/GoLeech/internal/config"
 	"github.com/GoLeech/GoLeech/internal/db"
 	"github.com/GoLeech/GoLeech/internal/task"
+	"github.com/GoLeech/GoLeech/pkg/typography"
 	tg "github.com/amarnathcjd/gogram/telegram"
 )
 
@@ -21,8 +23,7 @@ func HandleUserSettings(m *tg.NewMessage) error {
 	senderID := m.SenderID()
 	text, markup := GetUserSettingsFull(senderID, "main")
 
-	_, err := m.Reply(text, &tg.SendOptions{
-		ParseMode:   "html",
+	_, err := ui.Reply(m, text, &tg.SendOptions{
 		ReplyMarkup: markup,
 	})
 	return err
@@ -36,13 +37,12 @@ func RenderUserSettings(userID int64) (string, tg.ReplyMarkup) {
 // HandleBotSettings opens the runtime control center for Sudo administrators
 func HandleBotSettings(m *tg.NewMessage) error {
 	if !auth.IsSudo(m.SenderID()) {
-		_, err := m.Reply("⛔️ Only Sudo administrators can access bot configuration.", &tg.SendOptions{})
+		_, err := ui.Reply(m, "⛔️ Only Sudo administrators can access bot configuration.")
 		return err
 	}
 
 	text, markup := RenderBotSettings()
-	_, err := m.Reply(text, &tg.SendOptions{
-		ParseMode:   "html",
+	_, err := ui.Reply(m, text, &tg.SendOptions{
 		ReplyMarkup: markup,
 	})
 	return err
@@ -142,7 +142,7 @@ func RenderBotSettings() (string, tg.ReplyMarkup) {
 		),
 	)
 
-	return text, markup
+	return typography.ToSmallCapsHTML(text), typography.FormatMarkup(markup)
 }
 
 // HandleCallback processes all incoming inline keyboard callback queries
@@ -164,10 +164,10 @@ func HandleCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 		isSudo := auth.IsSudo(senderID)
 		success, msg := task.GlobalManager.CancelTask(gid, senderID, isSudo)
 		if success {
-			_, _ = cb.Answer("Task cancelled successfully!", &tg.CallbackOptions{Alert: false})
-			_, _ = cb.Edit("🛑 " + msg)
+			_, _ = ui.Answer(cb, "Task cancelled successfully!", &tg.CallbackOptions{Alert: false})
+			_, _ = ui.Edit(cb, "🛑 "+msg)
 		} else {
-			_, _ = cb.Answer(msg, &tg.CallbackOptions{Alert: true})
+			_, _ = ui.Answer(cb, msg, &tg.CallbackOptions{Alert: true})
 		}
 		return nil
 	}
@@ -180,21 +180,21 @@ func HandleCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 			switch action {
 			case "refresh":
 				text, markup := GenerateStatusMessage(1, "ALL")
-				_, _ = cb.Edit(text, &tg.SendOptions{ParseMode: "html", ReplyMarkup: markup})
-				_, _ = cb.Answer("Refreshed", &tg.CallbackOptions{})
+				_, _ = ui.Edit(cb, text, &tg.SendOptions{ReplyMarkup: markup})
+				_, _ = ui.Answer(cb, "Refreshed", &tg.CallbackOptions{})
 			case "page":
 				if len(parts) >= 3 {
 					var p int
 					fmt.Sscanf(parts[2], "%d", &p)
 					text, markup := GenerateStatusMessage(p, "ALL")
-					_, _ = cb.Edit(text, &tg.SendOptions{ParseMode: "html", ReplyMarkup: markup})
+					_, _ = ui.Edit(cb, text, &tg.SendOptions{ReplyMarkup: markup})
 				}
 				_, _ = cb.Answer("", &tg.CallbackOptions{})
 			case "filter":
 				if len(parts) >= 3 {
 					flt := parts[2]
 					text, markup := GenerateStatusMessage(1, flt)
-					_, _ = cb.Edit(text, &tg.SendOptions{ParseMode: "html", ReplyMarkup: markup})
+					_, _ = ui.Edit(cb, text, &tg.SendOptions{ReplyMarkup: markup})
 				}
 				_, _ = cb.Answer("", &tg.CallbackOptions{})
 			}
@@ -210,8 +210,7 @@ func HandleCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 			return nil
 		}
 		text, markup := GetHelpContent(tab)
-		_, _ = cb.Edit(text, &tg.SendOptions{
-			ParseMode:   "html",
+		_, _ = ui.Edit(cb, text, &tg.SendOptions{
 			ReplyMarkup: markup,
 		})
 		_, _ = cb.Answer("", &tg.CallbackOptions{})
@@ -221,12 +220,11 @@ func HandleCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 	// 4. System Stats Callback
 	if data == "stats:view" {
 		text := GetStatsMessage()
-		_, _ = cb.Edit(text, &tg.SendOptions{
-			ParseMode: "html",
-			ReplyMarkup: tg.Button.Keyboard(
-				tg.Button.Row(
-					tg.Button.Data("🔙 Back to Help", "help:main"),
-					tg.Button.Data("❌ Close", "help:close"),
+		_, _ = ui.Edit(cb, text, &tg.SendOptions{
+			ReplyMarkup: ui.Button.Keyboard(
+				ui.Button.Row(
+					ui.Button.Data("🔙 Back to Help", "help:main"),
+					ui.Button.Data("❌ Close", "help:close"),
 				),
 			),
 		})
@@ -249,7 +247,7 @@ func HandleCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 
 		// Security: Users can only change their own settings unless Sudo
 		if targetUID != senderID && !auth.IsSudo(senderID) {
-			_, _ = cb.Answer("⛔️ You can only modify your own settings.", &tg.CallbackOptions{Alert: true})
+			_, _ = ui.Answer(cb, "⛔️ You can only modify your own settings.", &tg.CallbackOptions{Alert: true})
 			return nil
 		}
 
@@ -268,7 +266,7 @@ func HandleCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 			case "toggle_doc":
 				st.AsDoc = !st.AsDoc
 				_ = db.GlobalStore.SaveUserSettings(st)
-				_, _ = cb.Answer("Leech format toggled!", &tg.CallbackOptions{})
+				_, _ = ui.Answer(cb, "Leech format toggled!", &tg.CallbackOptions{})
 
 			case "toggle_split":
 				if st.SplitSize > 2147483648 {
@@ -277,53 +275,52 @@ func HandleCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 					st.SplitSize = 4194304000 // 4GB
 				}
 				_ = db.GlobalStore.SaveUserSettings(st)
-				_, _ = cb.Answer("Split size updated!", &tg.CallbackOptions{})
+				_, _ = ui.Answer(cb, "Split size updated!", &tg.CallbackOptions{})
 
 			case "del_thumb":
 				if st.ThumbPath != "" {
 					_ = os.Remove(st.ThumbPath)
 					st.ThumbPath = ""
 					_ = db.GlobalStore.SaveUserSettings(st)
-					_, _ = cb.Answer("Thumbnail deleted!", &tg.CallbackOptions{})
+					_, _ = ui.Answer(cb, "Thumbnail deleted!", &tg.CallbackOptions{})
 				} else {
-					_, _ = cb.Answer("No custom thumbnail configured.", &tg.CallbackOptions{})
+					_, _ = ui.Answer(cb, "No custom thumbnail configured.", &tg.CallbackOptions{})
 				}
 
 			case "view_thumb":
 				if st.ThumbPath != "" {
 					if _, err := os.Stat(st.ThumbPath); err == nil {
-						_, _ = cb.Answer("Sending thumbnail...", &tg.CallbackOptions{})
+						_, _ = ui.Answer(cb, "Sending thumbnail...", &tg.CallbackOptions{})
 						_, _ = cb.RespondMedia(st.ThumbPath, &tg.MediaOptions{
-							Caption:   "🖼 <i>Your active custom leech thumbnail</i>",
+							Caption:   typography.ToSmallCapsHTML("🖼 <i>Your active custom leech thumbnail</i>"),
 							ParseMode: "html",
 						})
 						return nil
 					}
 				}
-				_, _ = cb.Answer("No custom thumbnail found. Send a photo in private chat to set one!", &tg.CallbackOptions{Alert: true})
+				_, _ = ui.Answer(cb, "No custom thumbnail found. Send a photo in private chat to set one!", &tg.CallbackOptions{Alert: true})
 				return nil
 
 			case "info_prefix":
-				_, _ = cb.Answer("To set prefix, send:\n/setprefix <text>\nTo clear: /setprefix", &tg.CallbackOptions{Alert: true})
+				_, _ = ui.Answer(cb, "To set prefix, send:\n/setprefix <text>\nTo clear: /setprefix", &tg.CallbackOptions{Alert: true})
 				return nil
 			case "info_suffix":
-				_, _ = cb.Answer("To set suffix, send:\n/setsuffix <text>\nTo clear: /setsuffix", &tg.CallbackOptions{Alert: true})
+				_, _ = ui.Answer(cb, "To set suffix, send:\n/setsuffix <text>\nTo clear: /setsuffix", &tg.CallbackOptions{Alert: true})
 				return nil
 			case "info_caption":
-				_, _ = cb.Answer("To set caption template, send:\n/setcaption <text>\nPlaceholders: {filename}, {size}, {duration}, {speed}\nTo clear: /setcaption", &tg.CallbackOptions{Alert: true})
+				_, _ = ui.Answer(cb, "To set caption template, send:\n/setcaption <text>\nPlaceholders: {filename}, {size}, {duration}, {speed}\nTo clear: /setcaption", &tg.CallbackOptions{Alert: true})
 				return nil
 			case "info_dump":
-				_, _ = cb.Answer("To set dump channel, send:\n/setdump <chat_id>\nTo clear: /setdump", &tg.CallbackOptions{Alert: true})
+				_, _ = ui.Answer(cb, "To set dump channel, send:\n/setdump <chat_id>\nTo clear: /setdump", &tg.CallbackOptions{Alert: true})
 				return nil
 
 			case "refresh":
-				_, _ = cb.Answer("Refreshed", &tg.CallbackOptions{})
+				_, _ = ui.Answer(cb, "Refreshed", &tg.CallbackOptions{})
 			}
 		}
 
 		text, markup := RenderUserSettings(targetUID)
-		_, _ = cb.Edit(text, &tg.SendOptions{
-			ParseMode:   "html",
+		_, _ = ui.Edit(cb, text, &tg.SendOptions{
 			ReplyMarkup: markup,
 		})
 		return nil
@@ -332,7 +329,7 @@ func HandleCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 	// 6. Bot Settings Callbacks (Sudo Only)
 	if strings.HasPrefix(data, "bsetting:") {
 		if !auth.IsSudo(senderID) {
-			_, _ = cb.Answer("⛔️ Admin access required.", &tg.CallbackOptions{Alert: true})
+			_, _ = ui.Answer(cb, "⛔️ Admin access required.", &tg.CallbackOptions{Alert: true})
 			return nil
 		}
 
@@ -345,19 +342,19 @@ func HandleCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 			return nil
 		case "toggle_leech":
 			cfg.DisableLeech = !cfg.DisableLeech
-			_, _ = cb.Answer("Leech state toggled!", &tg.CallbackOptions{})
+			_, _ = ui.Answer(cb, "Leech state toggled!", &tg.CallbackOptions{})
 		case "toggle_mirror":
 			cfg.DisableMirror = !cfg.DisableMirror
-			_, _ = cb.Answer("Mirror state toggled!", &tg.CallbackOptions{})
+			_, _ = ui.Answer(cb, "Mirror state toggled!", &tg.CallbackOptions{})
 		case "toggle_torrents":
 			cfg.DisableTorrents = !cfg.DisableTorrents
-			_, _ = cb.Answer("Torrent engine toggled!", &tg.CallbackOptions{})
+			_, _ = ui.Answer(cb, "Torrent engine toggled!", &tg.CallbackOptions{})
 		case "toggle_rss":
 			cfg.DisableRSS = !cfg.DisableRSS
-			_, _ = cb.Answer("RSS engine toggled!", &tg.CallbackOptions{})
+			_, _ = ui.Answer(cb, "RSS engine toggled!", &tg.CallbackOptions{})
 		case "toggle_search":
 			cfg.DisableSearch = !cfg.DisableSearch
-			_, _ = cb.Answer("Search engine toggled!", &tg.CallbackOptions{})
+			_, _ = ui.Answer(cb, "Search engine toggled!", &tg.CallbackOptions{})
 		case "interval":
 			if cfg.StatusUpdateInterval == 5 {
 				cfg.StatusUpdateInterval = 10
@@ -366,30 +363,29 @@ func HandleCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 			} else {
 				cfg.StatusUpdateInterval = 5
 			}
-			_, _ = cb.Answer(fmt.Sprintf("Interval set to %ds", cfg.StatusUpdateInterval), &tg.CallbackOptions{})
+			_, _ = ui.Answer(cb, fmt.Sprintf("Interval set to %ds", cfg.StatusUpdateInterval), &tg.CallbackOptions{})
 		case "q_dl_inc":
 			cfg.QueueDownload++
-			_, _ = cb.Answer(fmt.Sprintf("Queue DL: %d", cfg.QueueDownload), &tg.CallbackOptions{})
+			_, _ = ui.Answer(cb, fmt.Sprintf("Queue DL: %d", cfg.QueueDownload), &tg.CallbackOptions{})
 		case "q_dl_dec":
 			if cfg.QueueDownload > 1 {
 				cfg.QueueDownload--
 			}
-			_, _ = cb.Answer(fmt.Sprintf("Queue DL: %d", cfg.QueueDownload), &tg.CallbackOptions{})
+			_, _ = ui.Answer(cb, fmt.Sprintf("Queue DL: %d", cfg.QueueDownload), &tg.CallbackOptions{})
 		case "q_up_inc":
 			cfg.QueueUpload++
-			_, _ = cb.Answer(fmt.Sprintf("Queue UP: %d", cfg.QueueUpload), &tg.CallbackOptions{})
+			_, _ = ui.Answer(cb, fmt.Sprintf("Queue UP: %d", cfg.QueueUpload), &tg.CallbackOptions{})
 		case "q_up_dec":
 			if cfg.QueueUpload > 1 {
 				cfg.QueueUpload--
 			}
-			_, _ = cb.Answer(fmt.Sprintf("Queue UP: %d", cfg.QueueUpload), &tg.CallbackOptions{})
+			_, _ = ui.Answer(cb, fmt.Sprintf("Queue UP: %d", cfg.QueueUpload), &tg.CallbackOptions{})
 		case "refresh":
-			_, _ = cb.Answer("Refreshed", &tg.CallbackOptions{})
+			_, _ = ui.Answer(cb, "Refreshed", &tg.CallbackOptions{})
 		}
 
 		text, markup := RenderBotSettings()
-		_, _ = cb.Edit(text, &tg.SendOptions{
-			ParseMode:   "html",
+		_, _ = ui.Edit(cb, text, &tg.SendOptions{
 			ReplyMarkup: markup,
 		})
 		return nil
@@ -398,11 +394,11 @@ func HandleCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 	// 7. Process Restart Callback
 	if data == "bot:restart_confirm" {
 		if !auth.IsSudo(senderID) {
-			_, _ = cb.Answer("⛔️ Sudo privileges required.", &tg.CallbackOptions{Alert: true})
+			_, _ = ui.Answer(cb, "⛔️ Sudo privileges required.", &tg.CallbackOptions{Alert: true})
 			return nil
 		}
-		_, _ = cb.Answer("Restarting bot...", &tg.CallbackOptions{})
-		_, _ = cb.Edit("🔄 <b>GoLeech is restarting gracefully...</b>", &tg.SendOptions{ParseMode: "html"})
+		_, _ = ui.Answer(cb, "Restarting bot...", &tg.CallbackOptions{})
+		_, _ = ui.Edit(cb, "🔄 <b>GoLeech is restarting gracefully...</b>")
 		go func() {
 			time.Sleep(1 * time.Second)
 			os.Exit(0)
@@ -410,7 +406,7 @@ func HandleCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 		return nil
 	}
 
-	_, _ = cb.Answer("Action handled", &tg.CallbackOptions{})
+	_, _ = ui.Answer(cb, "Action handled", &tg.CallbackOptions{})
 	return nil
 }
 
@@ -426,7 +422,7 @@ func HandleSetThumb(m *tg.NewMessage) error {
 	}
 
 	if targetMsg.Photo() == nil && !targetMsg.IsMedia() {
-		_, err := m.Reply("⚠️ <b>Please reply to a photo or image</b> with <code>/setthumb</code>, or send a photo directly in private chat.", &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, "⚠️ <b>Please reply to a photo or image</b> with <code>/setthumb</code>, or send a photo directly in private chat.")
 		return err
 	}
 
@@ -436,7 +432,7 @@ func HandleSetThumb(m *tg.NewMessage) error {
 
 	_, err := targetMsg.Download(&tg.DownloadOptions{FileName: targetFile})
 	if err != nil {
-		_, err = m.Reply("❌ Failed to download and save thumbnail: "+err.Error(), &tg.SendOptions{})
+		_, err = ui.Reply(m, "❌ Failed to download and save thumbnail: "+err.Error())
 		return err
 	}
 
@@ -456,12 +452,11 @@ func HandleSetThumb(m *tg.NewMessage) error {
 │
 ┖ <i>This thumbnail will be embedded into all your future leeched media files!</i>`
 
-	_, err = m.Reply(msg, &tg.SendOptions{
-		ParseMode: "html",
-		ReplyMarkup: tg.Button.Keyboard(
-			tg.Button.Row(
-				tg.Button.Data("⚙️ View Settings", fmt.Sprintf("usetting:refresh:%d", senderID)),
-				tg.Button.Data("🗑 Delete Thumb", fmt.Sprintf("usetting:del_thumb:%d", senderID)),
+	_, err = ui.Reply(m, msg, &tg.SendOptions{
+		ReplyMarkup: ui.Button.Keyboard(
+			ui.Button.Row(
+				ui.Button.Data("⚙️ View Settings", fmt.Sprintf("usetting:refresh:%d", senderID)),
+				ui.Button.Data("🗑 Delete Thumb", fmt.Sprintf("usetting:del_thumb:%d", senderID)),
 			),
 		),
 	})
@@ -477,11 +472,11 @@ func HandleDelThumb(m *tg.NewMessage) error {
 			_ = os.Remove(st.ThumbPath)
 			st.ThumbPath = ""
 			_ = db.GlobalStore.SaveUserSettings(st)
-			_, err := m.Reply("🗑 <b>Custom thumbnail removed successfully.</b>", &tg.SendOptions{ParseMode: "html"})
+			_, err := ui.Reply(m, "🗑 <b>Custom thumbnail removed successfully.</b>")
 			return err
 		}
 	}
-	_, err := m.Reply("⚠️ You do not have an active custom thumbnail.", &tg.SendOptions{})
+	_, err := ui.Reply(m, "⚠️ You do not have an active custom thumbnail.")
 	return err
 }
 
@@ -500,11 +495,11 @@ func HandleSetPrefix(m *tg.NewMessage) error {
 	}
 
 	if prefix == "" {
-		_, err := m.Reply("🗑 <b>Custom leech prefix cleared.</b>", &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, "🗑 <b>Custom leech prefix cleared.</b>")
 		return err
 	}
 
-	_, err := m.Reply(fmt.Sprintf("🏷 <b>Leech Prefix updated:</b> <code>%s</code>", html.EscapeString(prefix)), &tg.SendOptions{ParseMode: "html"})
+	_, err := ui.Reply(m, fmt.Sprintf("🏷 <b>Leech Prefix updated:</b> <code><raw>%s</raw></code>", html.EscapeString(prefix)))
 	return err
 }
 
@@ -523,11 +518,11 @@ func HandleSetSuffix(m *tg.NewMessage) error {
 	}
 
 	if suffix == "" {
-		_, err := m.Reply("🗑 <b>Custom leech suffix cleared.</b>", &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, "🗑 <b>Custom leech suffix cleared.</b>")
 		return err
 	}
 
-	_, err := m.Reply(fmt.Sprintf("🏷 <b>Leech Suffix updated:</b> <code>%s</code>", html.EscapeString(suffix)), &tg.SendOptions{ParseMode: "html"})
+	_, err := ui.Reply(m, fmt.Sprintf("🏷 <b>Leech Suffix updated:</b> <code><raw>%s</raw></code>", html.EscapeString(suffix)))
 	return err
 }
 
@@ -546,17 +541,17 @@ func HandleSetCaption(m *tg.NewMessage) error {
 	}
 
 	if caption == "" {
-		_, err := m.Reply("🗑 <b>Custom caption reset to default.</b>", &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, "🗑 <b>Custom caption reset to default.</b>")
 		return err
 	}
 
 	msg := fmt.Sprintf(`📝 <b><u>Custom Leech Caption Saved!</u></b>
 │
-<blockquote expandable>%s</blockquote>
+<blockquote expandable><raw>%s</raw></blockquote>
 │
 ┖ <i>Available placeholders: {filename}, {size}, {duration}, {speed}</i>`, html.EscapeString(caption))
 
-	_, err := m.Reply(msg, &tg.SendOptions{ParseMode: "html"})
+	_, err := ui.Reply(m, msg)
 	return err
 }
 
@@ -574,22 +569,22 @@ func HandleSetDump(m *tg.NewMessage) error {
 		if arg == "" {
 			st.DumpChat = 0
 			_ = db.GlobalStore.SaveUserSettings(st)
-			_, err := m.Reply("🗑 <b>Leech dump channel cleared.</b>", &tg.SendOptions{ParseMode: "html"})
+			_, err := ui.Reply(m, "🗑 <b>Leech dump channel cleared.</b>")
 			return err
 		}
 
 		id, err := strconv.ParseInt(arg, 10, 64)
 		if err != nil {
-			_, err = m.Reply("❌ Invalid chat ID format. Example: <code>/setdump -1001234567890</code>", &tg.SendOptions{ParseMode: "html"})
+			_, err = ui.Reply(m, "❌ Invalid chat ID format. Example: <code>/setdump -1001234567890</code>")
 			return err
 		}
 
 		st.DumpChat = id
 		_ = db.GlobalStore.SaveUserSettings(st)
-		_, err = m.Reply(fmt.Sprintf("📺 <b>Leech dump channel set to:</b> <code>%d</code>", id), &tg.SendOptions{ParseMode: "html"})
+		_, err = ui.Reply(m, fmt.Sprintf("📺 <b>Leech dump channel set to:</b> <code>%d</code>", id))
 		return err
 	}
 
-	_, err := m.Reply("Database unavailable.", &tg.SendOptions{})
+	_, err := ui.Reply(m, "Database unavailable.")
 	return err
 }

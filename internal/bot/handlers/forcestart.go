@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/GoLeech/GoLeech/internal/auth"
+	"github.com/GoLeech/GoLeech/internal/bot/ui"
 	"github.com/GoLeech/GoLeech/internal/task"
 	tg "github.com/amarnathcjd/gogram/telegram"
 )
@@ -14,7 +15,7 @@ func HandleForceStart(m *tg.NewMessage) error {
 	chatID := m.ChatID()
 
 	if !auth.CanExecute(senderID, chatID) {
-		_, err := m.Reply("⛔️ You are not authorized to execute tasks.", &tg.SendOptions{})
+		_, err := ui.Reply(m, "⛔️ You are not authorized to execute tasks.")
 		return err
 	}
 
@@ -43,7 +44,7 @@ func HandleForceStart(m *tg.NewMessage) error {
 		usage := `⚠️ <b>ForceStart Usage:</b>
 ┃ ┠ <code>/forcestart &lt;gid&gt;</code> (or <code>/fs &lt;gid&gt;</code>)
 ┃ ┖ Or reply to a task status message with: <code>/forcestart</code>`
-		_, err := m.Reply(usage, &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, usage)
 		return err
 	}
 
@@ -51,10 +52,10 @@ func HandleForceStart(m *tg.NewMessage) error {
 	success, msg := task.GlobalManager.ForceStartTask(targetGID, senderID, isSudo)
 
 	if success {
-		_, err := m.Reply("⚡️ "+msg, &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, "⚡️ "+msg)
 		return err
 	}
 
-	_, err := m.Reply("❌ "+msg, &tg.SendOptions{})
+	_, err := ui.Reply(m, "❌ "+msg)
 	return err
 }

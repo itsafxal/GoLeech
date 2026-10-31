@@ -186,12 +186,12 @@ func buildCaption(filename string, size int64, partNum, totalParts int, t *task.
 		sb.WriteString(" <b>" + suffix + "</b>")
 	}
 
-	sb.WriteString("\n\n┠ <b>Size:</b> " + utils.FormatBytes(size))
+	sb.WriteString("\n\n┠ <b>ꜱɪᴢᴇ:</b> " + utils.FormatBytes(size))
 	if totalParts > 1 {
-		sb.WriteString(fmt.Sprintf("\n┠ <b>Part:</b> %d / %d", partNum, totalParts))
+		sb.WriteString(fmt.Sprintf("\n┠ <b>ᴘᴀʀᴛ:</b> %d / %d", partNum, totalParts))
 	}
 	if t.UserName != "" {
-		sb.WriteString("\n┠ <b>By:</b> @" + t.UserName)
+		sb.WriteString("\n┠ <b>ʙʏ:</b> @" + t.UserName)
 	}
 
 	if userCaption != "" {

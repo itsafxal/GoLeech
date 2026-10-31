@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/GoLeech/GoLeech/internal/auth"
+	"github.com/GoLeech/GoLeech/pkg/typography"
 	tg "github.com/amarnathcjd/gogram/telegram"
 )
 
@@ -41,9 +42,9 @@ func HandleStart(m *tg.NewMessage) error {
 		),
 	)
 
-	_, err := m.Reply(text, &tg.SendOptions{
+	_, err := m.Reply(typography.ToSmallCapsHTML(text), &tg.SendOptions{
 		ParseMode:   "html",
-		ReplyMarkup: markup,
+		ReplyMarkup: typography.FormatMarkup(markup),
 	})
 	if err != nil {
 		log.Printf("⚠️ Error replying to /start for %d: %v", senderID, err)
@@ -54,9 +55,9 @@ func HandleStart(m *tg.NewMessage) error {
 // HandleHelp displays the interactive tabbed help menu
 func HandleHelp(m *tg.NewMessage) error {
 	text, markup := GetHelpContent("main")
-	_, err := m.Reply(text, &tg.SendOptions{
+	_, err := m.Reply(typography.ToSmallCapsHTML(text), &tg.SendOptions{
 		ParseMode:   "html",
-		ReplyMarkup: markup,
+		ReplyMarkup: typography.FormatMarkup(markup),
 	})
 	if err != nil {
 		log.Printf("⚠️ Error replying to /help for %d: %v", m.SenderID(), err)
@@ -215,5 +216,5 @@ func GetHelpContent(tab string) (string, tg.ReplyMarkup) {
 		),
 	)
 
-	return text, markup
+	return typography.ToSmallCapsHTML(text), typography.FormatMarkup(markup)
 }

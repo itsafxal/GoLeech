@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/GoLeech/GoLeech/internal/auth"
+	"github.com/GoLeech/GoLeech/internal/bot/ui"
 	"github.com/GoLeech/GoLeech/internal/db"
 	tg "github.com/amarnathcjd/gogram/telegram"
 )
@@ -16,7 +17,7 @@ import (
 func HandleAddImage(m *tg.NewMessage, botClient *tg.Client) error {
 	senderID := m.SenderID()
 	if !auth.CanExecute(senderID, m.ChatID()) {
-		_, err := m.Reply("⛔️ You are not authorized to use this command.")
+		_, err := ui.Reply(m, "⛔️ You are not authorized to use this command.")
 		return err
 	}
 
@@ -43,7 +44,7 @@ func HandleAddImage(m *tg.NewMessage, botClient *tg.Client) error {
 ┠ <b>Reply to Link:</b> <code>/addimage {link}</code>
 ┠ <b>Reply to Photo:</b> <code>/addimage</code>
 ┖ <b>Supported:</b> <i>Telegra.ph, DDL direct links, Telegram photos</i>`
-		_, err := m.Reply(usage, &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, usage)
 		return err
 	}
 
@@ -53,11 +54,11 @@ func HandleAddImage(m *tg.NewMessage, botClient *tg.Client) error {
 		resp := fmt.Sprintf(`⚜ <b><u>Image Added</u></b>
 │
 ┖ <b>Total Images:</b> <code>%d</code>`, len(images))
-		_, err := m.Reply(resp, &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, resp)
 		return err
 	}
 
-	_, err := m.Reply("Database not initialized.")
+	_, err := ui.Reply(m, "Database not initialized.")
 	return err
 }
 
@@ -65,39 +66,38 @@ func HandleAddImage(m *tg.NewMessage, botClient *tg.Client) error {
 func HandleImages(m *tg.NewMessage, botClient *tg.Client) error {
 	senderID := m.SenderID()
 	if !auth.CanExecute(senderID, m.ChatID()) {
-		_, err := m.Reply("⛔️ You are not authorized to use this command.")
+		_, err := ui.Reply(m, "⛔️ You are not authorized to use this command.")
 		return err
 	}
 
 	if db.GlobalStore == nil {
-		_, err := m.Reply("Database not initialized.")
+		_, err := ui.Reply(m, "Database not initialized.")
 		return err
 	}
 
 	images := db.GlobalStore.GetImages()
 	if len(images) == 0 {
-		_, err := m.Reply("<b>No Photo to Show!</b> Add one using <code>/addimage</code>.", &tg.SendOptions{ParseMode: "html"})
+		_, err := ui.Reply(m, "<b>No Photo to Show!</b> Add one using <code>/addimage</code>.")
 		return err
 	}
 
 	total := len(images)
 	caption := fmt.Sprintf("⚜ <b><u>Image Gallery</u></b>\n│\n┖ 🌄 <b>No. : 1 / %d</b>", total)
-	markup := tg.Button.Keyboard(
-		tg.Button.Row(
-			tg.Button.Data("«", fmt.Sprintf("images %d turn %d", senderID, total-1)),
-			tg.Button.Data("»", fmt.Sprintf("images %d turn %d", senderID, 1%total)),
+	markup := ui.Button.Keyboard(
+		ui.Button.Row(
+			ui.Button.Data("«", fmt.Sprintf("images %d turn %d", senderID, total-1)),
+			ui.Button.Data("»", fmt.Sprintf("images %d turn %d", senderID, 1%total)),
 		),
-		tg.Button.Row(
-			tg.Button.Data("🗑 Remove Image", fmt.Sprintf("images %d remov 0", senderID)),
-			tg.Button.Data("❌ Close", fmt.Sprintf("images %d close", senderID)),
+		ui.Button.Row(
+			ui.Button.Data("🗑 Remove Image", fmt.Sprintf("images %d remov 0", senderID)),
+			ui.Button.Data("❌ Close", fmt.Sprintf("images %d close", senderID)),
 		),
-		tg.Button.Row(
-			tg.Button.Data("💥 Remove All", fmt.Sprintf("images %d removall", senderID)),
+		ui.Button.Row(
+			ui.Button.Data("💥 Remove All", fmt.Sprintf("images %d removall", senderID)),
 		),
 	)
 
-	_, err := m.Reply(caption, &tg.SendOptions{
-		ParseMode:   "html",
+	_, err := ui.Reply(m, caption, &tg.SendOptions{
 		ReplyMarkup: markup,
 	})
 	return err
@@ -113,7 +113,7 @@ func HandleImageCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 	var targetUID int64
 	fmt.Sscanf(data[1], "%d", &targetUID)
 	if targetUID != 0 && targetUID != cb.SenderID && !auth.IsSudo(cb.SenderID) {
-		_, _ = cb.Answer("Not Authorized User!", &tg.CallbackOptions{Alert: true})
+		_, _ = ui.Answer(cb, "Not Authorized User!", &tg.CallbackOptions{Alert: true})
 		return nil
 	}
 
@@ -132,7 +132,7 @@ func HandleImageCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 
 	if action == "removall" {
 		_ = db.GlobalStore.ClearImages()
-		_, _ = cb.Answer("All Images Successfully Deleted", &tg.CallbackOptions{Alert: true})
+		_, _ = ui.Answer(cb, "All Images Successfully Deleted", &tg.CallbackOptions{Alert: true})
 		_, _ = cb.Delete()
 		return nil
 	}
@@ -140,7 +140,7 @@ func HandleImageCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 	if action == "remov" && len(data) > 3 {
 		idx, _ := strconv.Atoi(data[3])
 		_ = db.GlobalStore.RemoveImage(idx)
-		_, _ = cb.Answer("Image Successfully Deleted", &tg.CallbackOptions{Alert: true})
+		_, _ = ui.Answer(cb, "Image Successfully Deleted", &tg.CallbackOptions{Alert: true})
 		images = db.GlobalStore.GetImages()
 		if len(images) == 0 {
 			_, _ = cb.Delete()
@@ -163,23 +163,22 @@ func HandleImageCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 		prev := (idx - 1 + total) % total
 		next := (idx + 1) % total
 
-		caption := fmt.Sprintf("⚜ <b><u>Image Gallery</u></b>\n│\n┖ 🌄 <b>No. : %d / %d</b>\n\n<code>%s</code>", idx+1, total, images[idx])
-		markup := tg.Button.Keyboard(
-			tg.Button.Row(
-				tg.Button.Data("«", fmt.Sprintf("images %d turn %d", cb.SenderID, prev)),
-				tg.Button.Data("»", fmt.Sprintf("images %d turn %d", cb.SenderID, next)),
+		caption := fmt.Sprintf("⚜ <b><u>Image Gallery</u></b>\n│\n┖ 🌄 <b>No. : %d / %d</b>\n\n<code><raw>%s</raw></code>", idx+1, total, images[idx])
+		markup := ui.Button.Keyboard(
+			ui.Button.Row(
+				ui.Button.Data("«", fmt.Sprintf("images %d turn %d", cb.SenderID, prev)),
+				ui.Button.Data("»", fmt.Sprintf("images %d turn %d", cb.SenderID, next)),
 			),
-			tg.Button.Row(
-				tg.Button.Data("🗑 Remove Image", fmt.Sprintf("images %d remov %d", cb.SenderID, idx)),
-				tg.Button.Data("❌ Close", fmt.Sprintf("images %d close", cb.SenderID)),
+			ui.Button.Row(
+				ui.Button.Data("🗑 Remove Image", fmt.Sprintf("images %d remov %d", cb.SenderID, idx)),
+				ui.Button.Data("❌ Close", fmt.Sprintf("images %d close", cb.SenderID)),
 			),
-			tg.Button.Row(
-				tg.Button.Data("💥 Remove All", fmt.Sprintf("images %d removall", cb.SenderID)),
+			ui.Button.Row(
+				ui.Button.Data("💥 Remove All", fmt.Sprintf("images %d removall", cb.SenderID)),
 			),
 		)
 
-		_, _ = cb.Edit(caption, &tg.SendOptions{
-			ParseMode:   "html",
+		_, _ = ui.Edit(cb, caption, &tg.SendOptions{
 			ReplyMarkup: markup,
 		})
 		_, _ = cb.Answer("", &tg.CallbackOptions{})

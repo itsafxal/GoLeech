@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/GoLeech/GoLeech/internal/bot/handlers"
+	"github.com/GoLeech/GoLeech/internal/bot/ui"
 	"github.com/GoLeech/GoLeech/internal/config"
 	"github.com/GoLeech/GoLeech/internal/db"
 	tg "github.com/amarnathcjd/gogram/telegram"
@@ -88,12 +89,11 @@ func RegisterRoutes(botClient *tg.Client) {
 ┠ <b>Status:</b> ✅ Active
 │
 ┖ <i>This image will be embedded into all your future leeched media files!</i>`
-				_, _ = m.Reply(successText, &tg.SendOptions{
-					ParseMode: "html",
-					ReplyMarkup: tg.Button.Keyboard(
-						tg.Button.Row(
-							tg.Button.Data("⚙️ View Settings", fmt.Sprintf("usetting:refresh:%d", m.SenderID())),
-							tg.Button.Data("🗑 Delete Thumb", fmt.Sprintf("usetting:del_thumb:%d", m.SenderID())),
+				_, _ = ui.Reply(m, successText, &tg.SendOptions{
+					ReplyMarkup: ui.Button.Keyboard(
+						ui.Button.Row(
+							ui.Button.Data("⚙️ View Settings", fmt.Sprintf("usetting:refresh:%d", m.SenderID())),
+							ui.Button.Data("🗑 Delete Thumb", fmt.Sprintf("usetting:del_thumb:%d", m.SenderID())),
 						),
 					),
 				})

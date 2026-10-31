@@ -11,6 +11,7 @@ import (
 
 	"github.com/GoLeech/GoLeech/internal/auth"
 	"github.com/GoLeech/GoLeech/internal/db"
+	"github.com/GoLeech/GoLeech/pkg/typography"
 	"github.com/GoLeech/GoLeech/pkg/utils"
 	tg "github.com/amarnathcjd/gogram/telegram"
 )
@@ -347,8 +348,13 @@ var OptionCatalog = map[string]OptionInfo{
 	},
 }
 
-// GetUserSettingsFull builds the WZML-X hierarchical settings view and buttons
+// GetUserSettingsFull builds the WZML-X hierarchical settings view and buttons in Small Caps typography
 func GetUserSettingsFull(userID int64, page string) (string, tg.ReplyMarkup) {
+	text, markup := buildUserSettingsFull(userID, page)
+	return typography.ToSmallCapsHTML(text), typography.FormatMarkup(markup)
+}
+
+func buildUserSettingsFull(userID int64, page string) (string, tg.ReplyMarkup) {
 	var st *db.UserSettings
 	if db.GlobalStore != nil {
 		st, _ = db.GlobalStore.GetUserSettings(userID)
@@ -1026,11 +1032,16 @@ func GetUserSettingsFull(userID int64, page string) (string, tg.ReplyMarkup) {
 		return text, markup
 	}
 
-	return GetUserSettingsFull(userID, "main")
+	return buildUserSettingsFull(userID, "main")
 }
 
-// GetOptionMenu renders the dedicated configuration panel for an individual option
+// GetOptionMenu renders the dedicated configuration panel for an individual option in Small Caps typography
 func GetOptionMenu(option string, userID int64) (string, tg.ReplyMarkup) {
+	text, markup := buildOptionMenu(option, userID)
+	return typography.ToSmallCapsHTML(text), typography.FormatMarkup(markup)
+}
+
+func buildOptionMenu(option string, userID int64) (string, tg.ReplyMarkup) {
 	info, exists := OptionCatalog[option]
 	if !exists {
 		info = OptionInfo{
@@ -1072,14 +1083,17 @@ func GetOptionMenu(option string, userID int64) (string, tg.ReplyMarkup) {
 			}
 		}
 	}
+	currValDisplay := currVal
 	if currVal == "" {
-		currVal = "Not Set"
+		currValDisplay = "Not Set"
+	} else if currVal != "Active" {
+		currValDisplay = fmt.Sprintf("<raw>%s</raw>", html.EscapeString(currVal))
 	}
 
 	text := fmt.Sprintf(`⚜ <b><u>%s</u></b>
 │
 ┠ <b>Description:</b> <i>%s</i>
-┖ <b>Current Value:</b> <code>%s</code>`, info.Title, info.Description, html.EscapeString(currVal))
+┖ <b>Current Value:</b> <code>%s</code>`, info.Title, info.Description, currValDisplay)
 
 	var rows []*tg.KeyboardButtonRow
 	setLabel := "✏️ Set"
@@ -1123,7 +1137,7 @@ func HandleUsersetCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 	var targetUID int64
 	fmt.Sscanf(data[1], "%d", &targetUID)
 	if targetUID != 0 && targetUID != cb.SenderID && !auth.IsSudo(cb.SenderID) {
-		_, _ = cb.Answer("Not Yours!", &tg.CallbackOptions{Alert: true})
+		_, _ = cb.Answer(typography.ToSmallCaps("Not Yours!"), &tg.CallbackOptions{Alert: true})
 		return nil
 	}
 
@@ -1156,7 +1170,7 @@ func HandleUsersetCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 			opt := data[3]
 			if len(data) >= 5 && data[4] == "stop" {
 				ClearPendingInput(targetUID)
-				_, _ = cb.Answer("Prompt cancelled.", &tg.CallbackOptions{})
+				_, _ = cb.Answer(typography.ToSmallCaps("Prompt cancelled."), &tg.CallbackOptions{})
 			}
 			text, markup := GetOptionMenu(opt, targetUID)
 			_, _ = cb.Edit(text, &tg.SendOptions{ParseMode: "html", ReplyMarkup: markup})
@@ -1173,11 +1187,11 @@ func HandleUsersetCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 			}
 			SetPendingInput(targetUID, opt, info.ParentPage)
 
-			promptText := fmt.Sprintf(`⚜ <b><u>Set %s</u></b>
+			promptText := typography.ToSmallCapsHTML(fmt.Sprintf(`⚜ <b><u>Set %s</u></b>
 │
-%s`, info.Title, info.Prompt)
+%s`, info.Title, info.Prompt))
 
-			markup := tg.Button.Keyboard(
+			markup := typography.FormatMarkup(tg.Button.Keyboard(
 				tg.Button.Row(
 					tg.Button.Data("🛑 Cancel / Stop", fmt.Sprintf("userset %d menu %s stop", targetUID, opt)),
 				),
@@ -1185,7 +1199,7 @@ func HandleUsersetCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 					tg.Button.Data("🔙 Back", fmt.Sprintf("userset %d menu %s", targetUID, opt)),
 					tg.Button.Data("❌ Close", fmt.Sprintf("userset %d close", targetUID)),
 				),
-			)
+			))
 
 			_, _ = cb.Edit(promptText, &tg.SendOptions{ParseMode: "html", ReplyMarkup: markup})
 			_, _ = cb.Answer("", &tg.CallbackOptions{})
@@ -1212,7 +1226,7 @@ func HandleUsersetCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 				}
 				_ = db.GlobalStore.SaveUserSettings(st)
 			}
-			_, _ = cb.Answer("Reset successful!", &tg.CallbackOptions{})
+			_, _ = cb.Answer(typography.ToSmallCaps("Reset successful!"), &tg.CallbackOptions{})
 			text, markup := GetOptionMenu(opt, targetUID)
 			_, _ = cb.Edit(text, &tg.SendOptions{ParseMode: "html", ReplyMarkup: markup})
 		}
@@ -1233,7 +1247,7 @@ func HandleUsersetCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 				}
 				_ = db.GlobalStore.SaveUserSettings(st)
 			}
-			_, _ = cb.Answer("Removed successfully!", &tg.CallbackOptions{Alert: true})
+			_, _ = cb.Answer(typography.ToSmallCaps("Removed successfully!"), &tg.CallbackOptions{Alert: true})
 			text, markup := GetOptionMenu(opt, targetUID)
 			_, _ = cb.Edit(text, &tg.SendOptions{ParseMode: "html", ReplyMarkup: markup})
 		}
@@ -1279,27 +1293,27 @@ func HandleUsersetCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 			st, _ := db.GlobalStore.GetUserSettings(targetUID)
 			if st != nil && st.ThumbPath != "" {
 				if _, err := os.Stat(st.ThumbPath); err == nil {
-					_, _ = cb.Answer("Sending thumbnail...", &tg.CallbackOptions{})
+					_, _ = cb.Answer(typography.ToSmallCaps("Sending thumbnail..."), &tg.CallbackOptions{})
 					_, _ = botClient.SendMedia(cb.SenderID, st.ThumbPath, &tg.MediaOptions{
-						Caption: "🖼 <b>Your Current Custom Thumbnail</b>",
+						Caption: typography.ToSmallCapsHTML("🖼 <b>Your Current Custom Thumbnail</b>"),
 					})
 					return nil
 				}
 			}
-			_, _ = cb.Answer("No custom thumbnail found. Send a photo in private chat to set one!", &tg.CallbackOptions{Alert: true})
+			_, _ = cb.Answer(typography.ToSmallCaps("No custom thumbnail found. Send a photo in private chat to set one!"), &tg.CallbackOptions{Alert: true})
 		}
 		return nil
 
 	case "confirm_reset_all":
-		confirmText := `⚠️ <b><u>Confirm Reset All Settings</u></b>
+		confirmText := typography.ToSmallCapsHTML(`⚠️ <b><u>Confirm Reset All Settings</u></b>
 │
-┖ <i>Are you sure you want to reset all your custom user settings back to system defaults?</i>`
-		markup := tg.Button.Keyboard(
+┖ <i>Are you sure you want to reset all your custom user settings back to system defaults?</i>`)
+		markup := typography.FormatMarkup(tg.Button.Keyboard(
 			tg.Button.Row(
 				tg.Button.Data("🔴 Yes, Reset All", fmt.Sprintf("userset %d do_reset_all", targetUID)),
 				tg.Button.Data("🔙 Back", fmt.Sprintf("userset %d back", targetUID)),
 			),
-		)
+		))
 		_, _ = cb.Edit(confirmText, &tg.SendOptions{ParseMode: "html", ReplyMarkup: markup})
 		_, _ = cb.Answer("", &tg.CallbackOptions{})
 		return nil
@@ -1316,7 +1330,7 @@ func HandleUsersetCallback(cb *tg.CallbackQuery, botClient *tg.Client) error {
 			}
 			_ = db.GlobalStore.SaveUserSettings(cleanSettings)
 		}
-		_, _ = cb.Answer("All settings have been reset to defaults!", &tg.CallbackOptions{Alert: true})
+		_, _ = cb.Answer(typography.ToSmallCaps("All settings have been reset to defaults!"), &tg.CallbackOptions{Alert: true})
 		text, markup := GetUserSettingsFull(targetUID, "main")
 		_, _ = cb.Edit(text, &tg.SendOptions{ParseMode: "html", ReplyMarkup: markup})
 		return nil
@@ -1348,7 +1362,7 @@ func formatOpt(val, fallback string) string {
 	if val == "" {
 		return fmt.Sprintf("<i>%s</i>", fallback)
 	}
-	return fmt.Sprintf("<code>%s</code>", html.EscapeString(val))
+	return fmt.Sprintf("<code><raw>%s</raw></code>", html.EscapeString(val))
 }
 
 func formatBool(val bool, trueLabel, falseLabel string) string {
@@ -1388,12 +1402,12 @@ func ProcessPendingUserInput(m *tg.NewMessage, pending *PendingUserState, botCli
 
 	text := strings.TrimSpace(m.Text())
 	if text == "/cancel" || text == "/stop" {
-		_, err := m.Reply("🛑 Input cancelled.")
+		_, err := m.Reply(typography.ToSmallCaps("🛑 Input cancelled."))
 		return err
 	}
 
 	if db.GlobalStore == nil {
-		_, err := m.Reply("Database not initialized.")
+		_, err := m.Reply(typography.ToSmallCaps("Database not initialized."))
 		return err
 	}
 
@@ -1476,18 +1490,18 @@ func ProcessPendingUserInput(m *tg.NewMessage, pending *PendingUserState, botCli
 		title = info.Title
 	}
 
-	respMsg := fmt.Sprintf(`⚜ <b><u>%s Saved!</u></b>
+	respMsg := typography.ToSmallCapsHTML(fmt.Sprintf(`⚜ <b><u>%s Saved!</u></b>
 │
 ┠ <b>Option:</b> %s
-┠ <b>Value:</b> <code>%s</code>
-┖ <b>Status:</b> ✅ Updated successfully!`, title, pending.Option, html.EscapeString(displayVal))
+┠ <b>Value:</b> <code><raw>%s</raw></code>
+┖ <b>Status:</b> ✅ Updated successfully!`, title, pending.Option, html.EscapeString(displayVal)))
 
-	markup := tg.Button.Keyboard(
+	markup := typography.FormatMarkup(tg.Button.Keyboard(
 		tg.Button.Row(
 			tg.Button.Data("⚙️ Back to Settings", fmt.Sprintf("userset %d %s", senderID, pending.Category)),
 			tg.Button.Data("❌ Close", fmt.Sprintf("userset %d close", senderID)),
 		),
-	)
+	))
 
 	_, err := m.Reply(respMsg, &tg.SendOptions{
 		ParseMode:   "html",
