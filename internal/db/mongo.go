@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GoLeech/GoLeech/internal/config"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -16,12 +17,30 @@ import (
 )
 
 func initMongoDB(uri string) (*Store, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	cfg := config.Get()
+
+	timeout := 10 * time.Second
+	if cfg != nil && cfg.DBTimeout > 0 {
+		timeout = time.Duration(cfg.DBTimeout) * time.Second
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	maxPool := uint64(50)
+	minPool := uint64(5)
+	if cfg != nil {
+		if cfg.DBMaxPoolSize > 0 {
+			maxPool = cfg.DBMaxPoolSize
+		}
+		if cfg.DBMinPoolSize > 0 {
+			minPool = cfg.DBMinPoolSize
+		}
+	}
+
 	clientOpts := options.Client().ApplyURI(uri).
-		SetMaxPoolSize(50).
-		SetMinPoolSize(5).
+		SetMaxPoolSize(maxPool).
+		SetMinPoolSize(minPool).
 		SetMaxConnIdleTime(30 * time.Second)
 
 	client, err := mongo.Connect(ctx, clientOpts)
@@ -35,6 +54,9 @@ func initMongoDB(uri string) (*Store, error) {
 	}
 
 	dbName := "goleech"
+	if cfg != nil && cfg.DatabaseName != "" {
+		dbName = cfg.DatabaseName
+	}
 	// Check if database name is specified in URI path
 	if parts := strings.Split(uri, "/"); len(parts) > 3 {
 		pathPart := strings.Split(parts[3], "?")[0]
@@ -551,3 +573,4 @@ func restoreThumbnailIfNeeded(st *UserSettings) {
 		_ = os.WriteFile(st.ThumbPath, st.ThumbData, 0644)
 	}
 }
+

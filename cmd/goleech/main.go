@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -84,10 +85,11 @@ func main() {
 `)
 	fmt.Println("🚀 Initializing GoLeech - Powered by Go & Gogram MTProto...")
 
-	// 1. Load Configuration
+	// 1. Load Configuration & Startup Validation
 	cfg := config.LoadConfig()
-	if cfg.BotToken == "" {
-		log.Println("⚠️ WARNING: BOT_TOKEN is not set in environment or config. Please configure .env")
+	if missing := cfg.Validate(); len(missing) > 0 {
+		log.Printf("⚠️ WARNING: Missing required startup configuration: %s", strings.Join(missing, ", "))
+		log.Println("👉 Please configure your credentials in .env (refer to .env.example)")
 	}
 
 	// 2. Initialize Database Layer (MongoDB authoritative permanent storage with SQLite fallback)

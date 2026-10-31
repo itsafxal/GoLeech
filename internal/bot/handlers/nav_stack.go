@@ -65,3 +65,4 @@ func (n *navStackManager) GetParent(page string) string {
 		return "main"
 	}
 }
+
