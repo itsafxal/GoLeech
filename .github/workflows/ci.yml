@@ -1,0 +1,47 @@
+name: GoLeech CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg aria2 p7zip-full
+
+      - name: Verify Code Formatting
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "Go code is not formatted according to gofmt:"
+            gofmt -d .
+            exit 1
+          fi
+
+      - name: Run Go Vet
+        run: go vet ./...
+
+      - name: Run Test Suite
+        run: go test -v -race ./...
+
+      - name: Build Application Binaries
+        run: |
+          go build -v -o bin/goleech ./cmd/goleech
+          go build -v -o bin/goleech-login ./cmd/login
+

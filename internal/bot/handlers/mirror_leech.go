@@ -1,0 +1,236 @@
+package handlers
+
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/GoLeech/GoLeech/internal/auth"
+	"github.com/GoLeech/GoLeech/internal/config"
+	"github.com/GoLeech/GoLeech/internal/downloader"
+	dlHTTP "github.com/GoLeech/GoLeech/internal/downloader/http"
+	dlTG "github.com/GoLeech/GoLeech/internal/downloader/telegram"
+	dlTor "github.com/GoLeech/GoLeech/internal/downloader/torrent"
+	dlYT "github.com/GoLeech/GoLeech/internal/downloader/ytdlp"
+	"github.com/GoLeech/GoLeech/internal/media"
+	"github.com/GoLeech/GoLeech/internal/providers"
+	"github.com/GoLeech/GoLeech/internal/task"
+	"github.com/GoLeech/GoLeech/pkg/utils"
+	tg "github.com/amarnathcjd/gogram/telegram"
+)
+
+func HandleMirror(m *tg.NewMessage, botClient, userClient *tg.Client) error {
+	return processTask(m, task.TypeMirror, botClient, userClient)
+}
+
+func HandleLeech(m *tg.NewMessage, botClient, userClient *tg.Client) error {
+	return processTask(m, task.TypeLeech, botClient, userClient)
+}
+
+func processTask(m *tg.NewMessage, tType task.TaskType, botClient, userClient *tg.Client) error {
+	senderID := m.SenderID()
+	chatID := m.ChatID()
+
+	if !auth.IsAuthorized(senderID, chatID) {
+		_, err := m.Reply("⚠️ <b>Unauthorized:</b> You do not have permission to execute this command.", &tg.SendOptions{ParseMode: "html"})
+		return err
+	}
+
+	cfg := config.Get()
+	if tType == task.TypeLeech && cfg.DisableLeech {
+		_, err := m.Reply("⚠️ Leech functionality is currently disabled.", &tg.SendOptions{ParseMode: "html"})
+		return err
+	}
+	if tType == task.TypeMirror && cfg.DisableMirror {
+		_, err := m.Reply("⚠️ Mirror functionality is currently disabled.", &tg.SendOptions{ParseMode: "html"})
+		return err
+	}
+
+	opts := utils.ParseTaskOptions(m.Args())
+
+	// Check if replied message contains media or links
+	replyMsg, _ := m.GetReplyMessage()
+	if replyMsg != nil {
+		if replyMsg.IsMedia() {
+			opts.Link = "tg://media"
+		} else if opts.Link == "" && replyMsg.Text() != "" {
+			opts.Link = strings.TrimSpace(replyMsg.Text())
+		}
+	}
+
+	if opts.Link == "" {
+		_, err := m.Reply(fmt.Sprintf("⚠️ <b>Usage:</b> <code>/%s [link/flags]</code> or reply to a link/file.", strings.ToLower(string(tType))), &tg.SendOptions{ParseMode: "html"})
+		return err
+	}
+
+	// Create and register new task
+	userName := ""
+	if sender, err := m.GetSender(); err == nil && sender != nil {
+		userName = sender.Username
+	}
+
+	t := task.NewTask(senderID, userName, chatID, m.ID, tType, opts)
+	task.GlobalManager.AddTask(t)
+
+	// Send initial confirmation
+	notifyMsg, err := m.Reply(fmt.Sprintf("⏳ <b>Task Added to Queue:</b>\n┠ <b>GID:</b> <code>%s</code>\n┠ <b>Type:</b> <i>%s</i>\n┖ <b>Name:</b> <code>%s</code>", t.GID, t.Type, t.Name), &tg.SendOptions{
+		ParseMode: "html",
+		ReplyMarkup: tg.Button.Keyboard(
+			tg.Button.Row(
+				tg.Button.Data("🚫 Cancel Task", fmt.Sprintf("cancel:%s", t.GID)),
+			),
+		),
+	})
+	if err == nil && notifyMsg != nil {
+		t.MessageID = notifyMsg.ID
+	}
+
+	// Launch async task pipeline in dedicated goroutine
+	go runTaskPipeline(t, m, replyMsg, botClient, userClient)
+
+	return nil
+}
+
+func runTaskPipeline(t *task.Task, origMsg, replyMsg *tg.NewMessage, botClient, userClient *tg.Client) {
+	defer func() {
+		task.GlobalManager.RemoveTask(t.GID)
+		if r := recover(); r != nil {
+			t.SetError(fmt.Errorf("panic in task pipeline: %v", r))
+		}
+	}()
+
+	// 1. Acquire Download Slot
+	if err := task.GlobalManager.AcquireDownloadSlot(t); err != nil {
+		t.SetError(err)
+		_, _ = origMsg.Reply(fmt.Sprintf("❌ Task <code>%s</code> failed to start: %v", t.GID, err), &tg.SendOptions{ParseMode: "html"})
+		return
+	}
+	defer task.GlobalManager.ReleaseDownloadSlot()
+
+	t.SetStatus(task.StatusDownloading)
+	engineName := downloader.DetectEngine(t.Options.Link)
+	t.SetEngine(engineName)
+
+	var downloadedPath string
+	var dlErr error
+
+	progressCb := func(cur, tot int64, spd float64) {
+		t.UpdateProgress(cur, tot, spd)
+	}
+
+	// 2. Execute Download based on engine
+	switch {
+	case t.Options.Link == "tg://media" && replyMsg != nil && replyMsg.IsMedia():
+		t.SetEngine("Telegram")
+		tgDL := dlTG.NewDownloader(botClient)
+		downloadedPath, dlErr = tgDL.DownloadMedia(t.Ctx, replyMsg, t, progressCb)
+
+	case engineName == "Torrent":
+		t.SetEngine("Torrent")
+		torDL := dlTor.NewAria2Downloader("", "")
+		downloadedPath, dlErr = torDL.Download(t.Ctx, t, progressCb)
+
+	case engineName == "yt-dlp":
+		t.SetEngine("yt-dlp")
+		ytDL := dlYT.NewDownloader()
+		downloadedPath, dlErr = ytDL.Download(t.Ctx, t, progressCb)
+
+	default:
+		t.SetEngine("HTTP")
+		httpDL := dlHTTP.NewDownloader()
+		downloadedPath, dlErr = httpDL.Download(t.Ctx, t, progressCb)
+	}
+
+	if dlErr != nil {
+		t.SetError(dlErr)
+		_, _ = origMsg.Reply(fmt.Sprintf("❌ Download failed for <code>%s</code>:\n<code>%v</code>", t.Name, dlErr), &tg.SendOptions{ParseMode: "html"})
+		return
+	}
+
+	// 3. Post-Download Media Processing
+	workPath := downloadedPath
+
+	// Extract archive if requested (-e)
+	if t.Options.Extract {
+		t.SetStatus(task.StatusExtracting)
+		extractDir := filepath.Join(filepath.Dir(downloadedPath), "extracted")
+		if err := media.ExtractArchive(t.Ctx, downloadedPath, extractDir); err == nil {
+			workPath = extractDir
+		}
+	}
+
+	// Zip archive if requested (-z)
+	if t.Options.Zip {
+		t.SetStatus(task.StatusArchiving)
+		zipPath := filepath.Join(filepath.Dir(downloadedPath), t.Name+".zip")
+		if err := media.CreateZip(t.Ctx, downloadedPath, zipPath); err == nil {
+			workPath = zipPath
+		}
+	}
+
+	// 4. Acquire Upload Slot
+	if err := task.GlobalManager.AcquireUploadSlot(t); err != nil {
+		t.SetError(err)
+		return
+	}
+	defer task.GlobalManager.ReleaseUploadSlot()
+
+	t.SetStatus(task.StatusUploading)
+
+	// 5. Upload based on task type
+	cfg := config.Get()
+	var uploadRes *providers.UploadResult
+	var upErr error
+
+	if t.Type == task.TypeLeech {
+		t.SetEngine("Telegram")
+		tgUploader := providers.NewTelegramUploader(botClient, userClient)
+		uploadRes, upErr = tgUploader.Upload(t.Ctx, t, workPath, progressCb)
+	} else {
+		// Mirror task
+		dest := cfg.DefaultUpload
+		if t.Options.UploadDest != "" {
+			dest = t.Options.UploadDest
+		}
+
+		if strings.HasPrefix(dest, "pixeldrain") {
+			t.SetEngine("Pixeldrain")
+			uphoster := providers.NewUphosterUploader()
+			uploadRes, upErr = uphoster.UploadToPixeldrain(t.Ctx, workPath, progressCb)
+		} else if strings.HasPrefix(dest, "gofile") {
+			t.SetEngine("Gofile")
+			uphoster := providers.NewUphosterUploader()
+			uploadRes, upErr = uphoster.UploadToGofile(t.Ctx, workPath, progressCb)
+		} else {
+			// Rclone Cloud upload
+			t.SetEngine("Rclone")
+			rclone := providers.NewRcloneUploader()
+			uploadRes, upErr = rclone.Upload(t.Ctx, t, workPath, progressCb)
+		}
+	}
+
+	if upErr != nil {
+		t.SetError(upErr)
+		_, _ = origMsg.Reply(fmt.Sprintf("❌ Upload failed for <code>%s</code>:\n<code>%v</code>", t.Name, upErr), &tg.SendOptions{ParseMode: "html"})
+		return
+	}
+
+	t.SetStatus(task.StatusCompleted)
+
+	// Send success completion message
+	elapsed := time.Since(t.StartTime)
+	completeText := fmt.Sprintf(`✅ <b>Task Completed!</b>
+│
+┠ <b>Name:</b> <code>%s</code>
+┠ <b>Size:</b> <i>%s</i>
+┠ <b>Type:</b> <i>%s</i>
+┠ <b>Engine:</b> <i>%s</i>
+┖ <b>Elapsed:</b> <i>%s</i>`, t.Name, utils.FormatBytes(t.TotalSize), t.Type, t.Engine, utils.FormatDuration(elapsed))
+
+	if uploadRes != nil && uploadRes.URL != "" {
+		completeText += fmt.Sprintf("\n\n🔗 <b>Cloud Link:</b> %s", uploadRes.URL)
+	}
+
+	_, _ = origMsg.Reply(completeText, &tg.SendOptions{ParseMode: "html"})
+}

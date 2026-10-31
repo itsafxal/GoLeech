@@ -1,0 +1,19 @@
+services:
+  goleech:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: goleech_bot
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - ./downloads:/app/downloads
+      - ./data:/app/data
+      - ./rclone.conf:/root/.config/rclone/rclone.conf:ro
+    environment:
+      - DATABASE_PATH=/app/data/goleech.db
+      - DOWNLOAD_DIR=/app/downloads
+
