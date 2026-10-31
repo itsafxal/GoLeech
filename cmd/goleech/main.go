@@ -114,14 +114,14 @@ func main() {
 		}
 		log.Println("🤖 Gogram MTProto Bot client connected successfully")
 
-		// 5. Initialize Plugin Registry
+		// 5. Register Routes & Handlers immediately
+		bot.RegisterRoutes(botClient)
+		log.Println("📡 Telegram command handlers & callback router registered")
+
+		// 6. Initialize Plugin Registry
 		pluginReg := plugin.InitRegistry(botClient)
 		_ = pluginReg.RegisterPlugin(context.Background(), &plugin.MediaInfoPlugin{})
 		log.Println("🔌 Plugin Registry initialized with built-in extensions")
-
-		// 6. Register Routes & Handlers immediately
-		bot.RegisterRoutes(botClient)
-		log.Println("📡 Telegram command handlers & callback router registered")
 
 		// Optional: Asynchronously initialize Telegram User session if configured
 		if cfg.UserSessionString != "" {

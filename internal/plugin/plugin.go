@@ -52,19 +52,23 @@ func InitRegistry(client *tg.Client) *Registry {
 }
 
 func (r *Registry) RegisterPlugin(ctx context.Context, p Plugin) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	name := p.Name()
+
+	r.mu.Lock()
 	if _, exists := r.plugins[name]; exists {
+		r.mu.Unlock()
 		return fmt.Errorf("plugin %s already registered", name)
 	}
+	r.mu.Unlock()
 
+	// Initialize outside the registry lock so plugins can call RegisterCommand or RegisterHook without deadlocking
 	if err := p.Init(ctx, r); err != nil {
 		return fmt.Errorf("plugin %s failed to initialize: %w", name, err)
 	}
 
+	r.mu.Lock()
 	r.plugins[name] = p
+	r.mu.Unlock()
 	return nil
 }
 
